@@ -1,62 +1,94 @@
 import customtkinter as ctk
-from tkinter import filedialog
-import pandas as pd
+from pages.home import HomePage
+from pages.horas_extras import HorasExtrasPage
+from pages.funcionarios_ativos import FuncionariosAtivosPage
+from pages.auxilios_mes import AuxiliosMesPage
+from pages.horas_nao_contabilizadas import HorasNaoContabilizadasPage
 
-# Configuração visual do app
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
-# Janela principal
-app = ctk.CTk()
-app.title("Gerador de Planilhas - Departamento Pessoal")
-app.geometry("800x500")
 
-# Variável que vai guardar o caminho da planilha importada
-arquivo_selecionado = ""
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.title("Gerador de Planilhas - Departamento Pessoal")
+        self.geometry("950x600")
+        self.minsize(750, 450)
 
-# Função para importar a planilha
-def importar_planilha():
-    global arquivo_selecionado
-    arquivo_selecionado = filedialog.askopenfilename(
-        filetypes=[("Arquivos Excel", "*.xlsx *.xls")]
-    )
-    if arquivo_selecionado:
-        label_arquivo.configure(text=f"Arquivo: {arquivo_selecionado.split('/')[-1]}")
-        print(f"Planilha carregada: {arquivo_selecionado}")
+        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(0, weight=1)
 
-# Função para processar e exportar
-def exportar_planilha():
-    if not arquivo_selecionado:
-        print("Nenhuma planilha importada!")
-        return
+        # --- Sidebar ---
+        self.sidebar = ctk.CTkFrame(self, width=210, corner_radius=0)
+        self.sidebar.grid(row=0, column=0, sticky="nsew")
+        self.sidebar.grid_propagate(False)
+        self.sidebar.grid_columnconfigure(0, weight=1)
+        self.sidebar.grid_rowconfigure(10, weight=1)
 
-    df = pd.read_excel(arquivo_selecionado)
+        ctk.CTkLabel(
+            self.sidebar, text="SFP RH", font=("Arial", 20, "bold")
+        ).grid(row=0, column=0, padx=20, pady=(28, 5))
 
-    # ✏️ Aqui você vai adicionar suas transformações futuramente
+        ctk.CTkLabel(
+            self.sidebar, text="MENU", font=("Arial", 10), text_color="gray55"
+        ).grid(row=1, column=0, padx=20, pady=(0, 8))
 
-    destino = filedialog.asksaveasfilename(
-        defaultextension=".xlsx",
-        filetypes=[("Arquivo Excel", "*.xlsx")]
-    )
-    if destino:
-        df.to_excel(destino, index=False)
-        print("Planilha exportada com sucesso!")
+        nav_items = [
+            ("home",                    "🏠   Home"),
+            ("horas_extras",            "⏱   Horas Extras"),
+            ("funcionarios_ativos",     "👥   Funcionários Ativos"),
+            ("auxilios_mes",            "💰   Auxílios do Mês"),
+            ("horas_nao_contabilizadas","📋   Horas Não-Cont."),
+        ]
 
-# Interface — Título
-titulo = ctk.CTkLabel(app, text="Gerador de Planilhas", font=("Arial", 22, "bold"))
-titulo.pack(pady=20)
+        self.buttons = {}
+        for i, (key, label) in enumerate(nav_items):
+            btn = ctk.CTkButton(
+                self.sidebar,
+                text=label,
+                anchor="w",
+                height=38,
+                corner_radius=8,
+                fg_color="transparent",
+                text_color=("gray10", "gray85"),
+                hover_color=("gray80", "gray28"),
+                command=lambda k=key: self.show_page(k),
+            )
+            btn.grid(row=i + 2, column=0, padx=10, pady=3, sticky="ew")
+            self.buttons[key] = btn
 
-# Botão importar
-btn_importar = ctk.CTkButton(app, text="📂 Importar Planilha", command=importar_planilha)
-btn_importar.pack(pady=10)
+        # --- Área de conteúdo ---
+        self.content = ctk.CTkFrame(self, corner_radius=0)
+        self.content.grid(row=0, column=1, sticky="nsew")
+        self.content.grid_columnconfigure(0, weight=1)
+        self.content.grid_rowconfigure(0, weight=1)
 
-# Label que mostra o arquivo carregado
-label_arquivo = ctk.CTkLabel(app, text="Nenhum arquivo selecionado", font=("Arial", 12))
-label_arquivo.pack(pady=5)
+        # --- Páginas ---
+        self.pages = {
+            "home":                     HomePage(self.content),
+            "horas_extras":             HorasExtrasPage(self.content),
+            "funcionarios_ativos":      FuncionariosAtivosPage(self.content),
+            "auxilios_mes":             AuxiliosMesPage(self.content),
+            "horas_nao_contabilizadas": HorasNaoContabilizadasPage(self.content),
+        }
+        for page in self.pages.values():
+            page.grid(row=0, column=0, sticky="nsew")
 
-# Botão exportar
-btn_exportar = ctk.CTkButton(app, text="💾 Exportar Planilha", command=exportar_planilha)
-btn_exportar.pack(pady=10)
+        self.show_page("home")
 
-# Inicia o programa
-app.mainloop()
+    def show_page(self, name):
+        for page in self.pages.values():
+            page.grid_remove()
+        self.pages[name].grid()
+
+        for key, btn in self.buttons.items():
+            if key == name:
+                btn.configure(fg_color=("gray72", "gray32"), text_color=("black", "white"))
+            else:
+                btn.configure(fg_color="transparent", text_color=("gray10", "gray85"))
+
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
