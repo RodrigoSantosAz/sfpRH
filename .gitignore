@@ -16,3 +16,8 @@ venv/
 
 # VSCode
 .vscode/
+
+# PyInstaller
+build/
+dist/
+*.spec
