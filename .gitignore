@@ -1,18 +1,18 @@
+# Dados de runtime
+prefs.json
+recent_files.json
+historico_horas_extras.json
+
+# Assets gerados pelo usuário
+assets/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
 # Ambiente virtual
 venv/
 
-# Arquivos Python compilados
-__pycache__/
-*.pyc
-*.pyo
-
-# Arquivos do sistema
-.DS_Store
-Thumbs.db
-
-# Planilhas com dados reais (para não subir dados sensíveis)
-*.xlsx
-*.xls
-
-# Variáveis de ambiente
-.env
+# VSCode
+.vscode/
