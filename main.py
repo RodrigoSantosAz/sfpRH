@@ -66,7 +66,7 @@ class App(ctk.CTk):
 
         # --- Páginas ---
         self.pages = {
-            "home":                     HomePage(self.content),
+            "home":                     HomePage(self.content, navigate=self.show_page),
             "horas_extras":             HorasExtrasPage(self.content),
             "funcionarios_ativos":      FuncionariosAtivosPage(self.content),
             "auxilios_mes":             AuxiliosMesPage(self.content),
@@ -80,7 +80,10 @@ class App(ctk.CTk):
     def show_page(self, name):
         for page in self.pages.values():
             page.grid_remove()
-        self.pages[name].grid()
+        page = self.pages[name]
+        page.grid()
+        if hasattr(page, "on_show"):
+            page.after_idle(page.on_show)
 
         for key, btn in self.buttons.items():
             if key == name:

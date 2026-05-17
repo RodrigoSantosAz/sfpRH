@@ -3,6 +3,7 @@ import tkinter.ttk as ttk
 from tkinter import filedialog, messagebox
 import pandas as pd
 import threading
+import warnings
 import json
 import os
 
@@ -32,6 +33,9 @@ class BasePage(ctk.CTkFrame):
         super().__init__(parent, corner_radius=0)
         self.arquivo_selecionado = ""
         self.df_atual = None
+        self._df_preview = None
+        self._sort_col = None
+        self._sort_asc = True
         self._title = title
         self._configurar_estilo_treeview()
         self._build_ui()
@@ -114,7 +118,7 @@ class BasePage(ctk.CTkFrame):
 
         ctk.CTkLabel(
             preview_container,
-            text="Pré-visualização (primeiras 50 linhas)",
+            text="Planilha",
             font=("Arial", 11, "bold"), text_color="gray55",
         ).grid(row=0, column=0, sticky="w", pady=(0, 5))
 
@@ -160,7 +164,9 @@ class BasePage(ctk.CTkFrame):
 
     def _thread_importar(self, path):
         try:
-            df = pd.read_excel(path)
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", UserWarning)
+                df = pd.read_excel(path)
             self.after(0, lambda: self._on_importado(path, df))
         except Exception as e:
             msg = str(e)
@@ -194,15 +200,49 @@ class BasePage(ctk.CTkFrame):
         self._atualizar_preview(df)
 
     def _atualizar_preview(self, df):
+        self._df_preview = df
+        self._sort_col = None
+        self._sort_asc = True
+        self._renderizar_preview(df)
+
+    def _renderizar_preview(self, df):
+        larguras = {
+            col: self.tree.column(col, "width")
+            for col in (self.tree["columns"] or [])
+        }
         self.tree.delete(*self.tree.get_children())
         cols = list(df.columns)
         self.tree["columns"] = cols
         for col in cols:
-            self.tree.heading(col, text=col)
-            self.tree.column(col, width=130, minwidth=80, stretch=False)
-        for _, row in df.head(50).iterrows():
-            self.tree.insert("", "end", values=[str(v) for v in row])
+            indicador = ""
+            if col == self._sort_col:
+                indicador = " ▲" if self._sort_asc else " ▼"
+            self.tree.heading(
+                col, text=col + indicador,
+                command=lambda c=col: self._sort_by(c),
+            )
+            self.tree.column(col, width=larguras.get(col, 130), minwidth=80, stretch=False)
+        for _, row in df.iterrows():
+            valores = [self._celula_formato(col, row[col]) for col in cols]
+            self.tree.insert("", "end", values=valores)
         self.preview_placeholder.place_forget()
+
+    def _celula_formato(self, col, val):
+        return str(val)
+
+    def _sort_by(self, col):
+        if self._df_preview is None:
+            return
+        if self._sort_col == col:
+            self._sort_asc = not self._sort_asc
+        else:
+            self._sort_col = col
+            self._sort_asc = True
+        try:
+            df_sorted = self._df_preview.sort_values(by=col, ascending=self._sort_asc)
+        except Exception:
+            return
+        self._renderizar_preview(df_sorted)
 
     # ------------------------------------------------------------------ Export
 
