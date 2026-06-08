@@ -4,6 +4,7 @@ from pages.horas_extras import HorasExtrasPage
 from pages.funcionarios_ativos import FuncionariosAtivosPage
 from pages.auxilios_mes import AuxiliosMesPage
 from pages.horas_nao_contabilizadas import HorasNaoContabilizadasPage
+from pages.documentacao import DocumentacaoPage
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -24,7 +25,7 @@ class App(ctk.CTk):
         self.sidebar.grid(row=0, column=0, sticky="nsew")
         self.sidebar.grid_propagate(False)
         self.sidebar.grid_columnconfigure(0, weight=1)
-        self.sidebar.grid_rowconfigure(10, weight=1)
+        self.sidebar.grid_rowconfigure(11, weight=1)
 
         ctk.CTkLabel(
             self.sidebar, text="SFP RH", font=("Arial", 20, "bold")
@@ -40,6 +41,7 @@ class App(ctk.CTk):
             ("funcionarios_ativos",     "👥   Funcionários Ativos"),
             ("auxilios_mes",            "💰   Auxílios do Mês"),
             ("horas_nao_contabilizadas","📋   Horas Não-Cont."),
+            ("documentacao",            "📄   Documentação"),
         ]
 
         self.buttons = {}
@@ -71,6 +73,7 @@ class App(ctk.CTk):
             "funcionarios_ativos":      FuncionariosAtivosPage(self.content),
             "auxilios_mes":             AuxiliosMesPage(self.content),
             "horas_nao_contabilizadas": HorasNaoContabilizadasPage(self.content),
+            "documentacao":             DocumentacaoPage(self.content),
         }
         for page in self.pages.values():
             page.grid(row=0, column=0, sticky="nsew")
