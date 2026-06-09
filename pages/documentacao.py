@@ -1,4 +1,5 @@
 import os
+import sys
 import re
 import json
 import copy
@@ -10,26 +11,30 @@ from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
-_TEMPLATE_PROFESSOR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "Relatorio Professor.docx"
-)
-_TEMPLATE_OUTRO_CARGOS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "Relatorio Outro Cargos.docx"
-)
-_HISTORICO_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "sugestoes_professor.json"
-)
-_HISTORICO_OUTRO_CARGOS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "sugestoes_outro_cargos.json"
-)
-_CARGOS_PATH = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "cargos.json"
-)
+
+def _resource_path(*parts):
+    """Caminho para arquivo somente-leitura (bundled no _MEIPASS quando frozen)."""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+def _writable_path(*parts):
+    """Caminho para arquivo gravável (pasta ao lado do .exe quando frozen)."""
+    if getattr(sys, 'frozen', False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, *parts)
+
+
+_TEMPLATE_PROFESSOR          = _resource_path("arquivos", "Relatorio Professor.docx")
+_TEMPLATE_OUTRO_CARGOS       = _resource_path("arquivos", "Relatorio Outro Cargos.docx")
+_HISTORICO_PATH              = _writable_path("arquivos", "sugestoes_professor.json")
+_HISTORICO_OUTRO_CARGOS_PATH = _writable_path("arquivos", "sugestoes_outro_cargos.json")
+_CARGOS_PATH                 = _resource_path("arquivos", "cargos.json")
 
 
 # ---------------------------------------------------------------------------
@@ -50,6 +55,7 @@ def _carregar_historico(path=None) -> dict:
 def _salvar_historico(data: dict, path=None):
     if path is None:
         path = _HISTORICO_PATH
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
