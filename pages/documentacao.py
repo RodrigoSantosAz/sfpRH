@@ -1,11 +1,14 @@
 import os
 import re
 import json
+import copy
 import threading
 from datetime import datetime
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 
 _TEMPLATE_PROFESSOR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -13,7 +16,7 @@ _TEMPLATE_PROFESSOR = os.path.join(
 )
 _TEMPLATE_OUTRO_CARGOS = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "arquivos", "Relatorio Outro Cargos.doc"
+    "arquivos", "Relatorio Outro Cargos.docx"
 )
 _HISTORICO_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -22,6 +25,10 @@ _HISTORICO_PATH = os.path.join(
 _HISTORICO_OUTRO_CARGOS_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "arquivos", "sugestoes_outro_cargos.json"
+)
+_CARGOS_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "arquivos", "cargos.json"
 )
 
 
@@ -45,6 +52,72 @@ def _salvar_historico(data: dict, path=None):
         path = _HISTORICO_PATH
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def _carregar_cargos() -> dict:
+    if os.path.exists(_CARGOS_PATH):
+        try:
+            with open(_CARGOS_PATH, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _bind_scroll_dropdown(widget: ctk.CTkOptionMenu, valores: list):
+    # O DropdownMenu do CTkOptionMenu é um tkinter.Menu nativo do Windows.
+    # Quando aberto via post(), o OS intercepta todos os eventos de mouse
+    # (TrackPopupMenu tem seu próprio loop de mensagens) — impossível capturar
+    # <MouseWheel> via Tkinter enquanto o menu nativo estiver visível.
+    # O scroll funciona apenas com o dropdown fechado.
+    def _on_scroll(event):
+        try:
+            idx = valores.index(widget.get())
+        except ValueError:
+            return "break"
+        direction = 1 if event.delta < 0 else -1
+        novo_idx = max(0, min(len(valores) - 1, idx + direction))
+        if novo_idx != idx:
+            novo_val = valores[novo_idx]
+            widget.set(novo_val)
+            cmd = widget._command
+            if cmd:
+                cmd(novo_val)
+        return "break"
+
+    _sf = None
+    _p = getattr(widget, 'master', None)
+    for _ in range(10):
+        if _p is None:
+            break
+        if isinstance(_p, ctk.CTkScrollableFrame):
+            _sf = _p
+            break
+        _p = getattr(_p, 'master', None)
+
+    if _sf is None:
+        return
+
+    _canvas = _sf._parent_canvas  # tkinter.Canvas — bind_all sem restrição CTk
+
+    def _still_over_widget(event):
+        try:
+            return (widget.winfo_rootx() <= event.x_root <= widget.winfo_rootx() + widget.winfo_width()
+                    and widget.winfo_rooty() <= event.y_root <= widget.winfo_rooty() + widget.winfo_height())
+        except Exception:
+            return True
+
+    def _on_enter(_):
+        _canvas.bind_all("<MouseWheel>", _on_scroll)
+
+    def _on_leave(event):
+        if _still_over_widget(event):
+            return
+        if hasattr(_sf, '_mouse_wheel_all'):
+            _canvas.bind_all("<MouseWheel>", _sf._mouse_wheel_all)
+
+    widget.bind("<Enter>", _on_enter, add="+")
+    widget.bind("<Leave>", _on_leave, add="+")
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +399,7 @@ class _SubPaginaProfessor(ctk.CTkFrame):
                     self._getters[ph] = widget.get
                     if ph == "{{NIVEL}}":
                         widget.configure(command=self._on_nivel_alterado)
+                    _bind_scroll_dropdown(widget, opcoes)
 
                 elif tipo == "dropdown_map":
                     opcoes = list(extra.keys())
@@ -336,6 +410,7 @@ class _SubPaginaProfessor(ctk.CTkFrame):
                     widget.grid(row=row, column=1, sticky="ew", pady=4)
                     mapa = extra
                     self._getters[ph] = lambda w=widget, m=mapa: m[w.get()]
+                    _bind_scroll_dropdown(widget, opcoes)
 
                 elif tipo == "auto":
                     _iniciais = {
@@ -512,10 +587,6 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
         "Doutorado":                ("15%", "(quinze porcento)"),
     }
 
-    # Populated via cargo management feature (future)
-    # Format: { "Nome do Cargo": { "padrao": "", "sintese": "", "carga_horaria": "", "requisitos": "" } }
-    _CARGOS_DATA: dict = {}
-
     _ENTRY_PLACEHOLDERS = {"{{NUMERO_DOC}}", "{{NOME}}", "{{CURSO}}", "{{INSTITUICAO}}"}
     _DATE_PLACEHOLDERS  = {"{{DATA_INICIO}}"}
 
@@ -562,7 +633,8 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
         scroll.grid_columnconfigure(1, weight=1)
 
         historico = _carregar_historico(_HISTORICO_OUTRO_CARGOS_PATH)
-        cargos = list(self._CARGOS_DATA.keys()) or ["— Nenhum cargo cadastrado —"]
+        cargos = list(_carregar_cargos().keys()) or ["— Nenhum cargo cadastrado —"]
+        self._cargos_data = _carregar_cargos()
         _sem_cargo = "— Nenhum cargo cadastrado —"
 
         grupos = [
@@ -643,6 +715,7 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
                     w.set(default)
                     w.grid(row=row, column=1, sticky="ew", pady=4)
                     self._getters[ph] = w.get
+                    _bind_scroll_dropdown(w, opcoes)
 
                 elif tipo == "cargo_dd":
                     w = ctk.CTkOptionMenu(
@@ -652,6 +725,7 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
                     w.set(extra[0])
                     w.grid(row=row, column=1, sticky="ew", pady=4)
                     self._getters[ph] = lambda _w=w: "" if _w.get() == _sem_cargo else _w.get()
+                    _bind_scroll_dropdown(w, extra)
 
                 elif tipo == "nivel_curso_dd":
                     w = ctk.CTkOptionMenu(
@@ -661,6 +735,7 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
                     w.set(self._NIVEIS_CURSO[0])
                     w.grid(row=row, column=1, sticky="ew", pady=4)
                     self._getters[ph] = w.get
+                    _bind_scroll_dropdown(w, self._NIVEIS_CURSO)
 
                 elif tipo == "auto":
                     lbl = ctk.CTkLabel(
@@ -680,7 +755,7 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
     # ------------------------------------------------------------------ Callbacks
 
     def _on_cargo_alterado(self, cargo: str):
-        dados = self._CARGOS_DATA.get(cargo, {})
+        dados = self._cargos_data.get(cargo, {})
         for ph, chave in (
             ("{{PADRAO_CARGO}}",     "padrao"),
             ("{{SINTESE_CARGO}}",    "sintese"),
@@ -811,6 +886,26 @@ def _substituir_paragrafo(para, subs: dict):
     for chave, valor in subs.items():
         novo = novo.replace(chave, valor)
     if novo != texto and para.runs:
-        para.runs[0].text = novo
-        for r in para.runs[1:]:
+        run0 = para.runs[0]
+        rPr = run0._r.find(qn('w:rPr'))
+        for r in para.runs:
             r.text = ""
+        partes = novo.split('\n')
+        run0.text = partes[0]
+        prev_r = run0._r
+        for parte in partes[1:]:
+            br_r = OxmlElement('w:r')
+            if rPr is not None:
+                br_r.append(copy.deepcopy(rPr))
+            br_r.append(OxmlElement('w:br'))
+            prev_r.addnext(br_r)
+            text_r = OxmlElement('w:r')
+            if rPr is not None:
+                text_r.append(copy.deepcopy(rPr))
+            t = OxmlElement('w:t')
+            t.text = parte
+            if parte.startswith(' ') or parte.endswith(' '):
+                t.set('{http://www.w3.org/XML/1998/namespace}space', 'preserve')
+            text_r.append(t)
+            br_r.addnext(text_r)
+            prev_r = text_r
