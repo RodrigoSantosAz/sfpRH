@@ -5,6 +5,7 @@ from pages.funcionarios_ativos import FuncionariosAtivosPage
 from pages.auxilios_mes import AuxiliosMesPage
 from pages.horas_nao_contabilizadas import HorasNaoContabilizadasPage
 from pages.documentacao import DocumentacaoPage
+from pages.relatorio_ferias import RelatorioFeriasPage
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
@@ -42,6 +43,7 @@ class App(ctk.CTk):
             ("auxilios_mes",            "💰   Auxílios do Mês"),
             ("horas_nao_contabilizadas","📋   Horas Não-Cont."),
             ("documentacao",            "📄   Documentação"),
+            ("relatorio_ferias",        "🏖   Relatório Férias"),
         ]
 
         self.buttons = {}
@@ -74,6 +76,7 @@ class App(ctk.CTk):
             "auxilios_mes":             AuxiliosMesPage(self.content),
             "horas_nao_contabilizadas": HorasNaoContabilizadasPage(self.content),
             "documentacao":             DocumentacaoPage(self.content),
+            "relatorio_ferias":         RelatorioFeriasPage(self.content),
         }
         for page in self.pages.values():
             page.grid(row=0, column=0, sticky="nsew")
