@@ -32,7 +32,7 @@ def _writable_path(*parts):
 
 _TEMPLATE_PROFESSOR          = _resource_path("arquivos", "Relatorio Professor.docx")
 _TEMPLATE_OUTRO_CARGOS       = _resource_path("arquivos", "Relatorio Outro Cargos.docx")
-_TEMPLATE_CTC                = _resource_path("arquivos", "Relatorio ctc.doc")
+_TEMPLATE_CTS                = _resource_path("arquivos", "Relatorio ctc.doc")
 _HISTORICO_PATH              = _writable_path("arquivos", "sugestoes_professor.json")
 _HISTORICO_OUTRO_CARGOS_PATH = _writable_path("arquivos", "sugestoes_outro_cargos.json")
 _CARGOS_PATH                 = _resource_path("arquivos", "cargos.json")
@@ -365,7 +365,7 @@ class _CpfEntry(_DigitsEntry):
 class DocumentacaoPage(ctk.CTkFrame):
     page_key = "documentacao"
 
-    _TIPOS = ["Professor", "Outros Cargos", "Certidões (CTC)"]
+    _TIPOS = ["Professor", "Outros Cargos", "Certidões (CTS)"]
 
     def __init__(self, parent):
         super().__init__(parent, corner_radius=0)
@@ -403,7 +403,7 @@ class DocumentacaoPage(ctk.CTkFrame):
         self._sub_paginas = {
             "Professor":     _SubPaginaProfessor(self._content_area),
             "Outros Cargos": _SubPaginaOutrosCargos(self._content_area),
-            "Certidões (CTC)": _SubPaginaCTC(self._content_area),
+            "Certidões (CTS)": _SubPaginaCTS(self._content_area),
         }
         for sub in self._sub_paginas.values():
             sub.grid(row=0, column=0, sticky="nsew")
@@ -983,15 +983,14 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
         self._status.configure(text=msg, text_color=cores.get(tipo, "gray55"))
 
 
-class _SubPaginaCTC(ctk.CTkFrame):
+class _SubPaginaCTS(ctk.CTkFrame):
 
     def __init__(self, parent):
         super().__init__(parent, corner_radius=0, fg_color="transparent")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         self._getters = {}
-        self._date_widgets = {}
-        self._end_widgets = []
+        self._periodos = []
         self._cargo_data = _carregar_cargos()
         self._build_toolbar()
         self._build_form()
@@ -1006,25 +1005,23 @@ class _SubPaginaCTC(ctk.CTkFrame):
             side="right", padx=15, pady=10
         )
 
-    def _campo_data(self, parent, row, prefix, titulo, fim=False):
+    def _criar_data(self, parent, row, titulo):
+        widgets = []
         ctk.CTkLabel(parent, text=titulo, font=("Arial", 12), anchor="w").grid(
             row=row, column=0, sticky="w", padx=(8, 16), pady=4
         )
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=1, sticky="ew", pady=4)
-        frame.grid_columnconfigure(0, weight=1)
-        frame.grid_columnconfigure(1, weight=1)
-        frame.grid_columnconfigure(2, weight=1)
+        larguras = [58, 118, 72]
         valores = [(_DIAS, _DIA_ATUAL), (_MESES_PT, _MES_ATUAL), (_ANOS, _ANO_ATUAL)]
         for col, (opcoes, padrao) in enumerate(valores):
-            w = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+            frame.grid_columnconfigure(col, weight=0)
+            w = ctk.CTkOptionMenu(frame, values=opcoes, width=larguras[col], height=32)
             w.set(padrao)
-            w.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 4, 0))
+            w.grid(row=0, column=col, padx=(0 if col == 0 else 4, 0))
             _bind_scroll_dropdown(w, opcoes)
-            self._getters[f"{{{{{prefix}_{col}}}}}"] = w.get
-            if fim:
-                self._end_widgets.append(w)
-        self._date_widgets[prefix] = frame
+            widgets.append(w)
+        return widgets
 
     def _build_form(self):
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -1032,16 +1029,9 @@ class _SubPaginaCTC(ctk.CTkFrame):
         scroll.grid_columnconfigure(1, weight=1)
         row = 0
 
-        campos = [
-            ("entry", "{{NUMERO}}", "Número"),
-            ("letters", "{{NOME}}", "Nome"),
-            ("genero", "{{GENERO_1}}", "Gênero"),
-            ("digits", "{{RG}}", "RG"),
-            ("cpf", "{{CPF}}", "CPF"),
-            ("digits", "{{MATRICULA}}", "Matrícula"),
-            ("entry", "{{PORTARIA}}", "Portaria"),
-            ("cargo", "{{CARGO}}", "Cargo"),
-        ]
+        campos = [("entry", "{{NUMERO}}", "Número"), ("letters", "{{NOME}}", "Nome"),
+                  ("genero", "{{GENERO_1}}", "Gênero"), ("digits", "{{RG}}", "RG"),
+                  ("cpf", "{{CPF}}", "CPF")]
         ctk.CTkLabel(scroll, text="DADOS DO SERVIDOR", font=("Arial", 10, "bold"), text_color="gray50").grid(
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
         )
@@ -1068,13 +1058,6 @@ class _SubPaginaCTC(ctk.CTkFrame):
                 self._getters["{{GENERO_1}}"] = lambda _w=w: "a" if _w.get() == "Feminino" else ""
                 self._getters["{{GENERO_AO}}"] = lambda _w=w: "a" if _w.get() == "Feminino" else "o"
                 _bind_scroll_dropdown(w, ["Masculino", "Feminino"])
-            elif tipo == "cargo":
-                opcoes = list(self._cargo_data) or ["— Nenhum cargo cadastrado —"]
-                w = ctk.CTkOptionMenu(scroll, values=opcoes, height=32, command=self._on_cargo)
-                w.set(opcoes[0])
-                self._getters["{{CARGO}}"] = lambda _w=w: "" if _w.get().startswith("—") else _w.get()
-                self._getters["{{SINTESE}}"] = lambda _w=w: self._cargo_data.get(_w.get(), {}).get("sintese", "")
-                _bind_scroll_dropdown(w, opcoes)
             w.grid(row=row, column=1, sticky="ew", pady=4)
             row += 1
 
@@ -1082,12 +1065,10 @@ class _SubPaginaCTC(ctk.CTkFrame):
             row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
         )
         row += 1
-        self._campo_data(scroll, row, "INICIO", "Data Início")
-        row += 1
-        self._campo_data(scroll, row, "FIM", "Data Fim", fim=True)
-        row += 1
-        self._sem_fim = ctk.CTkCheckBox(scroll, text="Sem data fim", command=self._alternar_data_fim)
-        self._sem_fim.grid(row=row, column=1, sticky="w", padx=6, pady=7)
+        self._periodos_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        self._periodos_frame.grid(row=row, column=0, columnspan=2, sticky="ew")
+        self._periodos_frame.grid_columnconfigure(1, weight=1)
+        self._adicionar_periodo()
         row += 1
         ctk.CTkLabel(scroll, text="Data do Documento", font=("Arial", 12), anchor="w").grid(
             row=row, column=0, sticky="w", padx=(8, 16), pady=4
@@ -1095,58 +1076,146 @@ class _SubPaginaCTC(ctk.CTkFrame):
         frame = ctk.CTkFrame(scroll, fg_color="transparent")
         frame.grid(row=row, column=1, sticky="ew", pady=4)
         for col, (opcoes, padrao) in enumerate([(_DIAS, _DIA_ATUAL), (_MESES_PT, _MES_ATUAL), (_ANOS, _ANO_ATUAL)]):
-            w = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+            frame.grid_columnconfigure(col, weight=0)
+            w = ctk.CTkOptionMenu(frame, values=opcoes, width=[58, 118, 72][col], height=32)
             w.set(padrao)
-            w.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 4, 0))
-            frame.grid_columnconfigure(col, weight=1)
+            w.grid(row=0, column=col, padx=(0 if col == 0 else 4, 0))
             self._getters[f"{{{{DATA_DOC_{col}}}}}"] = w.get
             _bind_scroll_dropdown(w, opcoes)
+
+    def _adicionar_periodo(self):
+        periodo = {"frame": None, "inicio": [], "fim": [], "sem_fim": None,
+                   "matricula": None, "portaria": None, "cargo": None}
+        frame = ctk.CTkFrame(self._periodos_frame, border_width=1, border_color=("gray70", "gray35"))
+        frame.grid(row=len(self._periodos), column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        frame.grid_columnconfigure(1, weight=1)
+        periodo["frame"] = frame
+        numero = len(self._periodos) + 1
+        ctk.CTkLabel(frame, text=f"Período {numero}", font=("Arial", 12, "bold")).grid(
+            row=0, column=0, sticky="w", padx=8, pady=(8, 4)
+        )
+        if numero > 1:
+            ctk.CTkButton(frame, text="-", width=34, command=lambda p=periodo: self._remover_periodo(p)).grid(
+                row=0, column=1, sticky="e", padx=8, pady=(6, 2)
+            )
+        periodo["inicio"] = self._criar_data(frame, 1, "Data Início")
+        periodo["fim"] = self._criar_data(frame, 2, "Data Fim")
+        periodo["sem_fim"] = ctk.CTkCheckBox(frame, text="Sem data fim")
+        periodo["sem_fim"].grid(row=3, column=1, sticky="w", padx=6, pady=4)
+        ctk.CTkButton(frame, text="+", width=34, command=lambda p=periodo: self._adicionar_a_partir_de(p)).grid(
+            row=3, column=1, sticky="e", padx=8, pady=4
+        )
+        ctk.CTkLabel(frame, text="Matrícula", font=("Arial", 12), anchor="w").grid(
+            row=4, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        periodo["matricula"] = _DigitsEntry(frame, height=32, font=("Arial", 12))
+        periodo["matricula"].grid(row=4, column=1, sticky="ew", pady=4)
+        ctk.CTkLabel(frame, text="Portaria", font=("Arial", 12), anchor="w").grid(
+            row=5, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        periodo["portaria"] = ctk.CTkEntry(frame, height=32, font=("Arial", 12))
+        periodo["portaria"].grid(row=5, column=1, sticky="ew", pady=4)
+        ctk.CTkLabel(frame, text="Cargo", font=("Arial", 12), anchor="w").grid(
+            row=6, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        opcoes = list(self._cargo_data) or ["— Nenhum cargo cadastrado —"]
+        periodo["cargo"] = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+        periodo["cargo"].set(opcoes[0])
+        periodo["cargo"].grid(row=6, column=1, sticky="ew", pady=4)
+        _bind_scroll_dropdown(periodo["cargo"], opcoes)
+        self._periodos.append(periodo)
+
+    def _adicionar_a_partir_de(self, periodo):
+        if periodo["sem_fim"].get():
+            messagebox.showwarning("Período inválido", "Desmarque 'Sem data fim' antes de adicionar outro período.")
+            return
+        self._adicionar_periodo()
+
+    def _remover_periodo(self, periodo):
+        if len(self._periodos) == 1:
+            return
+        periodo["frame"].destroy()
+        self._periodos.remove(periodo)
+        for row, item in enumerate(self._periodos):
+            item["frame"].grid_configure(row=row)
+
+    def _alternar_data_fim(self):
+        pass
+
+    def _obter_data_widgets(self, widgets):
+        mes = _MESES_PT.index(widgets[1].get()) + 1
+        return datetime(int(widgets[2].get()), mes, int(widgets[0].get()))
+
+    def _coletar_periodos(self):
+        resultado = []
+        for indice, periodo in enumerate(self._periodos):
+            inicio = self._obter_data_widgets(periodo["inicio"])
+            sem_fim = bool(periodo["sem_fim"].get())
+            fim = datetime.now() if sem_fim else self._obter_data_widgets(periodo["fim"])
+            if fim < inicio:
+                raise ValueError(f"Data fim anterior à data início no período {indice + 1}")
+            if sem_fim and indice != len(self._periodos) - 1:
+                raise ValueError("Somente o último período pode estar sem data fim")
+            cargo = periodo["cargo"].get()
+            if cargo.startswith("—"):
+                cargo = ""
+            resultado.append({"periodo": f"{_data_por_extenso(inicio)} até {'a presente data da emissão desta declaração' if sem_fim else _data_por_extenso(fim)}",
+                              "dias": (fim - inicio).days, "matricula": periodo["matricula"].get(),
+                              "portaria": periodo["portaria"].get(), "cargo": cargo,
+                              "sintese": self._cargo_data.get(cargo, {}).get("sintese", "")})
+        return resultado
 
     def _build_statusbar(self):
         self._status = ctk.CTkLabel(self, text="", font=("Arial", 11), text_color="gray55")
         self._status.grid(row=2, column=0, padx=25, pady=(4, 8), sticky="w")
 
-    def _on_cargo(self, _valor):
-        pass
-
-    def _alternar_data_fim(self):
-        estado = ctk.DISABLED if self._sem_fim.get() else ctk.NORMAL
-        for widget in self._end_widgets:
-            widget.configure(state=estado)
+    def _exportar(self):
+        subs = {ph: getter() for ph, getter in self._getters.items()}
+        faltando = [ph for ph in ("{{NUMERO}}", "{{NOME}}", "{{RG}}") if not subs.get(ph, "").strip()]
+        if not self._getters["{{CPF}}"]() or not self._getters["{{CPF}}"]().replace(".", "").replace("-", "").isdigit() or len(self._getters["{{CPF}}"]().replace(".", "").replace("-", "")) != 11:
+            faltando.append("{{CPF}}")
+        try:
+            periodos = self._coletar_periodos()
+            data_doc = self._obter_data("DATA_DOC")
+        except (ValueError, IndexError):
+            messagebox.showwarning("Campos inválidos", "Confira as datas informadas e os campos obrigatórios.")
+            return
+        for indice, periodo in enumerate(periodos):
+            for campo in ("matricula", "portaria", "cargo", "sintese"):
+                if not periodo[campo].strip():
+                    faltando.append(f"Período {indice + 1}: {campo}")
+        if faltando:
+            messagebox.showwarning("Campos inválidos", "Preencha todos os campos obrigatórios antes de exportar.")
+            return
+        total_dias = sum(periodo["dias"] for periodo in periodos)
+        detalhes_periodos = "\r".join(
+            f"Durante o período de {periodo['periodo']} sob a matrícula nº {periodo['matricula']} "
+            f"no cargo de {periodo['cargo']}, conforme Portaria nº {periodo['portaria']}, "
+            f"exercendo as atribuições de: {periodo['sintese']} "
+            f"Totalizando {periodo['dias']} ({_numero_por_extenso(periodo['dias'])}) dias de serviços prestados a este Município."
+            for periodo in periodos
+        )
+        texto_periodos = detalhes_periodos
+        if len(periodos) > 1:
+            texto_periodos += (
+                f"\rTotalizando assim {total_dias} "
+                f"({_numero_por_extenso(total_dias)}) dias de serviços prestados "
+                "a este Município durante os períodos mencionados."
+            )
+        subs.update({
+            "{{BLOCO_PERIODOS}}": texto_periodos,
+            "{{DATA}}": _data_por_extenso(data_doc),
+        })
+        destino = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Documento Word", "*.docx")], initialfile="Relatorio cts_editado.docx")
+        if not destino:
+            return
+        self._set_loading(True)
+        threading.Thread(target=self._thread_exportar, args=(subs, destino), daemon=True).start()
 
     def _obter_data(self, prefix):
         valores = [self._getters[f"{{{{{prefix}_{col}}}}}"]() for col in range(3)]
         mes = _MESES_PT.index(valores[1]) + 1
         return datetime(int(valores[2]), mes, int(valores[0]))
-
-    def _exportar(self):
-        obrigatorios = ["{{NUMERO}}", "{{NOME}}", "{{RG}}", "{{CPF}}", "{{MATRICULA}}", "{{PORTARIA}}", "{{CARGO}}"]
-        subs = {ph: getter() for ph, getter in self._getters.items()}
-        faltando = [ph for ph in obrigatorios if not subs.get(ph, "").strip()]
-        if not self._getters["{{CPF}}"]() or not self._getters["{{CPF}}"]().replace(".", "").replace("-", "").isdigit() or len(self._getters["{{CPF}}"]().replace(".", "").replace("-", "")) != 11:
-            faltando.append("{{CPF}}")
-        try:
-            inicio = self._obter_data("INICIO")
-            fim = datetime.now() if self._sem_fim.get() else self._obter_data("FIM")
-            data_doc = self._obter_data("DATA_DOC")
-            if fim < inicio:
-                raise ValueError("Data fim anterior à data início")
-        except ValueError:
-            messagebox.showwarning("Campos inválidos", "Confira as datas informadas e os campos obrigatórios.")
-            return
-        if faltando:
-            messagebox.showwarning("Campos inválidos", "Preencha todos os campos obrigatórios antes de exportar.")
-            return
-        subs.update({
-            "{{PERIODO}}": f"{_data_por_extenso(inicio)} até {'a presente data' if self._sem_fim.get() else _data_por_extenso(fim)}",
-            "{{PERIODO_EXTENSO}}": f"{(fim - inicio).days} ({_numero_por_extenso((fim - inicio).days)})",
-            "{{DATA}}": _data_por_extenso(data_doc),
-        })
-        destino = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Documento Word", "*.docx")], initialfile="Relatorio ctc_editado.docx")
-        if not destino:
-            return
-        self._set_loading(True)
-        threading.Thread(target=self._thread_exportar, args=(subs, destino), daemon=True).start()
 
     def _thread_exportar(self, subs, destino):
         word = doc = None
@@ -1160,7 +1229,7 @@ class _SubPaginaCTC(ctk.CTkFrame):
             word.Visible = False
             word.DisplayAlerts = 0
             doc = word.Documents.Open(
-                os.path.abspath(_TEMPLATE_CTC),
+                os.path.abspath(_TEMPLATE_CTS),
                 ConfirmConversions=False,
                 ReadOnly=False,
                 AddToRecentFiles=False,
@@ -1177,14 +1246,33 @@ class _SubPaginaCTC(ctk.CTkFrame):
                     intervalo.Text = str(valor)
                     intervalo.Collapse(0)
 
+            texto_periodos = subs.pop("{{BLOCO_PERIODOS}}", None)
+            if texto_periodos is not None:
+                marcador_inicio = doc.Content.Duplicate
+                marcador_inicio.Find.ClearFormatting()
+                marcador_inicio.Find.Text = "{{PERIODO}}"
+                marcador_inicio.Find.Forward = True
+                marcador_inicio.Find.Wrap = 0
+                marcador_fim = doc.Content.Duplicate
+                marcador_fim.Find.ClearFormatting()
+                marcador_fim.Find.Text = "{{PERIODO_EXTENSO}}"
+                marcador_fim.Find.Forward = True
+                marcador_fim.Find.Wrap = 0
+                if not marcador_inicio.Find.Execute() or not marcador_fim.Find.Execute():
+                    raise ValueError("O fim do trecho dos períodos não foi encontrado no template CTS.")
+
+                inicio = marcador_inicio.Start - len("durante o período de ")
+                if inicio < 0 or marcador_fim.End < inicio:
+                    raise ValueError("O trecho dos períodos não foi encontrado no template CTS.")
+                doc.Range(inicio, marcador_fim.End).Text = texto_periodos
+                sufixo = "dias de serviços prestados a este Município."
+                texto_documento = doc.Content.Text
+                sufixo_inicio = texto_documento.rfind(sufixo)
+                if sufixo_inicio >= 0:
+                    doc.Range(sufixo_inicio, sufixo_inicio + len(sufixo)).Text = ""
+
             for chave, valor in subs.items():
                 substituir(chave, valor)
-            # O template DOC atual traz estes dois valores fixos em vez de placeholders.
-            for fixo, valor in (
-                ("MICHELLE OLIVEIRA SANTOS", subs["{{NOME}}"]),
-                ("5495/2022", subs["{{PORTARIA}}"]),
-            ):
-                substituir(fixo, valor)
             nome = subs["{{NOME}}"]
             if nome:
                 busca = doc.Content.Find
@@ -1199,12 +1287,21 @@ class _SubPaginaCTC(ctk.CTkFrame):
             doc.SaveAs2(os.path.abspath(destino), FileFormat=16)
             self.after(0, lambda: self._on_exportado(destino))
         except Exception as e:
-            self.after(0, lambda: self._on_erro(str(e)))
+            msg = str(e)
+            self.after(0, lambda: self._on_erro(msg))
         finally:
             if doc is not None:
-                doc.Close(False)
+                try:
+                    doc.Close(False)
+                except Exception:
+                    pass
             if word is not None:
-                word.Quit()
+                try:
+                    quit_word = getattr(word, "Quit", None)
+                    if callable(quit_word):
+                        quit_word()
+                except Exception:
+                    pass
             if com_inicializado:
                 pythoncom.CoUninitialize()
 
