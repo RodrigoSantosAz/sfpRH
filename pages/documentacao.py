@@ -32,6 +32,7 @@ def _writable_path(*parts):
 
 _TEMPLATE_PROFESSOR          = _resource_path("arquivos", "Relatorio Professor.docx")
 _TEMPLATE_OUTRO_CARGOS       = _resource_path("arquivos", "Relatorio Outro Cargos.docx")
+_TEMPLATE_CTC                = _resource_path("arquivos", "Relatorio ctc.doc")
 _HISTORICO_PATH              = _writable_path("arquivos", "sugestoes_professor.json")
 _HISTORICO_OUTRO_CARGOS_PATH = _writable_path("arquivos", "sugestoes_outro_cargos.json")
 _CARGOS_PATH                 = _resource_path("arquivos", "cargos.json")
@@ -149,6 +150,34 @@ _DIA_ATUAL = str(_hoje.day)
 _MES_ATUAL = _MESES_PT[_hoje.month - 1]
 _ANO_ATUAL = str(_hoje.year)
 
+
+def _data_por_extenso(data):
+    return f"{data.day} de {_MESES_PT[data.month - 1].lower()} de {data.year}"
+
+
+def _numero_por_extenso(numero):
+    unidades = ["zero", "um", "dois", "três", "quatro", "cinco", "seis", "sete", "oito", "nove"]
+    especiais = {10: "dez", 11: "onze", 12: "doze", 13: "treze", 14: "quatorze", 15: "quinze", 16: "dezesseis", 17: "dezessete", 18: "dezoito", 19: "dezenove"}
+    dezenas = ["", "", "vinte", "trinta", "quarenta", "cinquenta", "sessenta", "setenta", "oitenta", "noventa"]
+    centenas = ["", "cento", "duzentos", "trezentos", "quatrocentos", "quinhentos", "seiscentos", "setecentos", "oitocentos", "novecentos"]
+    if numero < 10:
+        return unidades[numero]
+    if numero < 20:
+        return especiais[numero]
+    if numero < 100:
+        return dezenas[numero // 10] + (f" e {unidades[numero % 10]}" if numero % 10 else "")
+    if numero == 100:
+        return "cem"
+    if numero < 1000:
+        return centenas[numero // 100] + (f" e {_numero_por_extenso(numero % 100)}" if numero % 100 else "")
+    if numero < 1000000:
+        milhares, resto = divmod(numero, 1000)
+        prefixo = "mil" if milhares == 1 else f"{_numero_por_extenso(milhares)} mil"
+        return prefixo + (f" {_numero_por_extenso(resto)}" if resto else "")
+    milhoes, resto = divmod(numero, 1000000)
+    prefixo = "um milhão" if milhoes == 1 else f"{_numero_por_extenso(milhoes)} milhões"
+    return prefixo + (f" {_numero_por_extenso(resto)}" if resto else "")
+
 # Formato: (tipo, placeholder, label, extra)
 #   tipo "entry"        → campo de texto livre
 #   tipo "dropdown"     → CTkOptionMenu; extra = lista de opções
@@ -260,13 +289,83 @@ class _MatriculaEntry(ctk.CTkEntry):
         return bool(v) and v.isdigit()
 
 
+class _LettersEntry(ctk.CTkEntry):
+
+    def __init__(self, master, **kwargs):
+        self._var = ctk.StringVar()
+        super().__init__(master, textvariable=self._var, **kwargs)
+        self._updating = False
+        self._var.trace_add("write", self._filtrar)
+
+    def _filtrar(self, *_):
+        if self._updating:
+            return
+        self._updating = True
+        valor = re.sub(r"[^\w\sÀ-ÿ]", "", self._var.get(), flags=re.UNICODE).replace("_", "")
+        if valor != self._var.get():
+            self._var.set(valor)
+            self.after(0, lambda: self.icursor("end"))
+        self._updating = False
+
+    def get(self) -> str:
+        return self._var.get()
+
+
+class _DigitsEntry(ctk.CTkEntry):
+
+    def __init__(self, master, max_length=None, **kwargs):
+        self._var = ctk.StringVar()
+        self._max_length = max_length
+        super().__init__(master, textvariable=self._var, **kwargs)
+        self._updating = False
+        self._var.trace_add("write", self._filtrar)
+
+    def _filtrar(self, *_):
+        if self._updating:
+            return
+        self._updating = True
+        valor = re.sub(r"\D", "", self._var.get())
+        if self._max_length:
+            valor = valor[:self._max_length]
+        if valor != self._var.get():
+            self._var.set(valor)
+            self.after(0, lambda: self.icursor("end"))
+        self._updating = False
+
+    def get(self) -> str:
+        return self._var.get()
+
+
+class _CpfEntry(_DigitsEntry):
+
+    def _filtrar(self, *_):
+        if self._updating:
+            return
+        self._updating = True
+        digits = re.sub(r"\D", "", self._var.get())[:11]
+        valor = digits
+        if len(digits) > 3:
+            valor = digits[:3] + "." + digits[3:]
+        if len(digits) > 6:
+            valor = valor[:7] + "." + valor[7:]
+        if len(digits) > 9:
+            valor = valor[:11] + "-" + valor[11:]
+        if valor != self._var.get():
+            self._var.set(valor)
+            self.after(0, lambda: self.icursor("end"))
+        self._updating = False
+
+    def is_valid(self):
+        return len(re.sub(r"\D", "", self._var.get())) == 11
+
+
 # ---------------------------------------------------------------------------
 # Página principal de Documentação
 # ---------------------------------------------------------------------------
 class DocumentacaoPage(ctk.CTkFrame):
     page_key = "documentacao"
 
-    _TIPOS = ["Professor", "Outros Cargos"]
+    _TIPOS = ["Professor", "Outros Cargos", "Certidões (CTC)"]
 
     def __init__(self, parent):
         super().__init__(parent, corner_radius=0)
@@ -304,6 +403,7 @@ class DocumentacaoPage(ctk.CTkFrame):
         self._sub_paginas = {
             "Professor":     _SubPaginaProfessor(self._content_area),
             "Outros Cargos": _SubPaginaOutrosCargos(self._content_area),
+            "Certidões (CTC)": _SubPaginaCTC(self._content_area),
         }
         for sub in self._sub_paginas.values():
             sub.grid(row=0, column=0, sticky="nsew")
@@ -881,6 +981,249 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
     def _set_status(self, msg, tipo="info"):
         cores = {"success": "#2fa843", "error": "#e74c3c", "warning": "#e67e22", "info": "gray55"}
         self._status.configure(text=msg, text_color=cores.get(tipo, "gray55"))
+
+
+class _SubPaginaCTC(ctk.CTkFrame):
+
+    def __init__(self, parent):
+        super().__init__(parent, corner_radius=0, fg_color="transparent")
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self._getters = {}
+        self._date_widgets = {}
+        self._end_widgets = []
+        self._cargo_data = _carregar_cargos()
+        self._build_toolbar()
+        self._build_form()
+        self._build_statusbar()
+
+    def _build_toolbar(self):
+        bar = ctk.CTkFrame(self, height=55, fg_color=("gray82", "gray18"))
+        bar.grid(row=0, column=0, sticky="ew")
+        bar.grid_propagate(False)
+        self._progress = ctk.CTkProgressBar(bar, mode="indeterminate", width=120, height=8)
+        ctk.CTkButton(bar, text="💾 Exportar .docx", width=150, command=self._exportar).pack(
+            side="right", padx=15, pady=10
+        )
+
+    def _campo_data(self, parent, row, prefix, titulo, fim=False):
+        ctk.CTkLabel(parent, text=titulo, font=("Arial", 12), anchor="w").grid(
+            row=row, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        frame = ctk.CTkFrame(parent, fg_color="transparent")
+        frame.grid(row=row, column=1, sticky="ew", pady=4)
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_columnconfigure(1, weight=1)
+        frame.grid_columnconfigure(2, weight=1)
+        valores = [(_DIAS, _DIA_ATUAL), (_MESES_PT, _MES_ATUAL), (_ANOS, _ANO_ATUAL)]
+        for col, (opcoes, padrao) in enumerate(valores):
+            w = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+            w.set(padrao)
+            w.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 4, 0))
+            _bind_scroll_dropdown(w, opcoes)
+            self._getters[f"{{{{{prefix}_{col}}}}}"] = w.get
+            if fim:
+                self._end_widgets.append(w)
+        self._date_widgets[prefix] = frame
+
+    def _build_form(self):
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 0))
+        scroll.grid_columnconfigure(1, weight=1)
+        row = 0
+
+        campos = [
+            ("entry", "{{NUMERO}}", "Número"),
+            ("letters", "{{NOME}}", "Nome"),
+            ("genero", "{{GENERO_1}}", "Gênero"),
+            ("digits", "{{RG}}", "RG"),
+            ("cpf", "{{CPF}}", "CPF"),
+            ("digits", "{{MATRICULA}}", "Matrícula"),
+            ("entry", "{{PORTARIA}}", "Portaria"),
+            ("cargo", "{{CARGO}}", "Cargo"),
+        ]
+        ctk.CTkLabel(scroll, text="DADOS DO SERVIDOR", font=("Arial", 10, "bold"), text_color="gray50").grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
+        )
+        row += 1
+        for tipo, placeholder, label in campos:
+            ctk.CTkLabel(scroll, text=label, font=("Arial", 12), anchor="w").grid(
+                row=row, column=0, sticky="w", padx=(8, 16), pady=4
+            )
+            if tipo == "entry":
+                w = ctk.CTkEntry(scroll, height=32, font=("Arial", 12))
+                self._getters[placeholder] = w.get
+            elif tipo == "letters":
+                w = _LettersEntry(scroll, height=32, font=("Arial", 12))
+                self._getters[placeholder] = lambda _w=w: _w.get().upper()
+            elif tipo == "digits":
+                w = _DigitsEntry(scroll, height=32, font=("Arial", 12))
+                self._getters[placeholder] = w.get
+            elif tipo == "cpf":
+                w = _CpfEntry(scroll, height=32, font=("Arial", 12))
+                self._getters[placeholder] = w.get
+            elif tipo == "genero":
+                w = ctk.CTkOptionMenu(scroll, values=["Masculino", "Feminino"], height=32)
+                w.set("Masculino")
+                self._getters["{{GENERO_1}}"] = lambda _w=w: "a" if _w.get() == "Feminino" else ""
+                self._getters["{{GENERO_AO}}"] = lambda _w=w: "a" if _w.get() == "Feminino" else "o"
+                _bind_scroll_dropdown(w, ["Masculino", "Feminino"])
+            elif tipo == "cargo":
+                opcoes = list(self._cargo_data) or ["— Nenhum cargo cadastrado —"]
+                w = ctk.CTkOptionMenu(scroll, values=opcoes, height=32, command=self._on_cargo)
+                w.set(opcoes[0])
+                self._getters["{{CARGO}}"] = lambda _w=w: "" if _w.get().startswith("—") else _w.get()
+                self._getters["{{SINTESE}}"] = lambda _w=w: self._cargo_data.get(_w.get(), {}).get("sintese", "")
+                _bind_scroll_dropdown(w, opcoes)
+            w.grid(row=row, column=1, sticky="ew", pady=4)
+            row += 1
+
+        ctk.CTkLabel(scroll, text="PERÍODO", font=("Arial", 10, "bold"), text_color="gray50").grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
+        )
+        row += 1
+        self._campo_data(scroll, row, "INICIO", "Data Início")
+        row += 1
+        self._campo_data(scroll, row, "FIM", "Data Fim", fim=True)
+        row += 1
+        self._sem_fim = ctk.CTkCheckBox(scroll, text="Sem data fim", command=self._alternar_data_fim)
+        self._sem_fim.grid(row=row, column=1, sticky="w", padx=6, pady=7)
+        row += 1
+        ctk.CTkLabel(scroll, text="Data do Documento", font=("Arial", 12), anchor="w").grid(
+            row=row, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        frame.grid(row=row, column=1, sticky="ew", pady=4)
+        for col, (opcoes, padrao) in enumerate([(_DIAS, _DIA_ATUAL), (_MESES_PT, _MES_ATUAL), (_ANOS, _ANO_ATUAL)]):
+            w = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+            w.set(padrao)
+            w.grid(row=0, column=col, sticky="ew", padx=(0 if col == 0 else 4, 0))
+            frame.grid_columnconfigure(col, weight=1)
+            self._getters[f"{{{{DATA_DOC_{col}}}}}"] = w.get
+            _bind_scroll_dropdown(w, opcoes)
+
+    def _build_statusbar(self):
+        self._status = ctk.CTkLabel(self, text="", font=("Arial", 11), text_color="gray55")
+        self._status.grid(row=2, column=0, padx=25, pady=(4, 8), sticky="w")
+
+    def _on_cargo(self, _valor):
+        pass
+
+    def _alternar_data_fim(self):
+        estado = ctk.DISABLED if self._sem_fim.get() else ctk.NORMAL
+        for widget in self._end_widgets:
+            widget.configure(state=estado)
+
+    def _obter_data(self, prefix):
+        valores = [self._getters[f"{{{{{prefix}_{col}}}}}"]() for col in range(3)]
+        mes = _MESES_PT.index(valores[1]) + 1
+        return datetime(int(valores[2]), mes, int(valores[0]))
+
+    def _exportar(self):
+        obrigatorios = ["{{NUMERO}}", "{{NOME}}", "{{RG}}", "{{CPF}}", "{{MATRICULA}}", "{{PORTARIA}}", "{{CARGO}}"]
+        subs = {ph: getter() for ph, getter in self._getters.items()}
+        faltando = [ph for ph in obrigatorios if not subs.get(ph, "").strip()]
+        if not self._getters["{{CPF}}"]() or not self._getters["{{CPF}}"]().replace(".", "").replace("-", "").isdigit() or len(self._getters["{{CPF}}"]().replace(".", "").replace("-", "")) != 11:
+            faltando.append("{{CPF}}")
+        try:
+            inicio = self._obter_data("INICIO")
+            fim = datetime.now() if self._sem_fim.get() else self._obter_data("FIM")
+            data_doc = self._obter_data("DATA_DOC")
+            if fim < inicio:
+                raise ValueError("Data fim anterior à data início")
+        except ValueError:
+            messagebox.showwarning("Campos inválidos", "Confira as datas informadas e os campos obrigatórios.")
+            return
+        if faltando:
+            messagebox.showwarning("Campos inválidos", "Preencha todos os campos obrigatórios antes de exportar.")
+            return
+        subs.update({
+            "{{PERIODO}}": f"{_data_por_extenso(inicio)} até {'a presente data' if self._sem_fim.get() else _data_por_extenso(fim)}",
+            "{{PERIODO_EXTENSO}}": f"{(fim - inicio).days} ({_numero_por_extenso((fim - inicio).days)})",
+            "{{DATA}}": _data_por_extenso(data_doc),
+        })
+        destino = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Documento Word", "*.docx")], initialfile="Relatorio ctc_editado.docx")
+        if not destino:
+            return
+        self._set_loading(True)
+        threading.Thread(target=self._thread_exportar, args=(subs, destino), daemon=True).start()
+
+    def _thread_exportar(self, subs, destino):
+        word = doc = None
+        com_inicializado = False
+        try:
+            import pythoncom
+            import win32com.client
+            pythoncom.CoInitialize()
+            com_inicializado = True
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = 0
+            doc = word.Documents.Open(
+                os.path.abspath(_TEMPLATE_CTC),
+                ConfirmConversions=False,
+                ReadOnly=False,
+                AddToRecentFiles=False,
+                NoEncodingDialog=True,
+            )
+            def substituir(texto, valor):
+                intervalo = doc.Content.Duplicate
+                localizar = intervalo.Find
+                localizar.ClearFormatting()
+                localizar.Text = texto
+                localizar.Forward = True
+                localizar.Wrap = 0
+                while localizar.Execute():
+                    intervalo.Text = str(valor)
+                    intervalo.Collapse(0)
+
+            for chave, valor in subs.items():
+                substituir(chave, valor)
+            # O template DOC atual traz estes dois valores fixos em vez de placeholders.
+            for fixo, valor in (
+                ("MICHELLE OLIVEIRA SANTOS", subs["{{NOME}}"]),
+                ("5495/2022", subs["{{PORTARIA}}"]),
+            ):
+                substituir(fixo, valor)
+            nome = subs["{{NOME}}"]
+            if nome:
+                busca = doc.Content.Find
+                busca.ClearFormatting()
+                busca.Replacement.ClearFormatting()
+                busca.Text = nome
+                busca.Forward = True
+                busca.Wrap = 0
+                while busca.Execute():
+                    busca.Parent.Font.Bold = True
+                    busca.Parent.Collapse(0)
+            doc.SaveAs2(os.path.abspath(destino), FileFormat=16)
+            self.after(0, lambda: self._on_exportado(destino))
+        except Exception as e:
+            self.after(0, lambda: self._on_erro(str(e)))
+        finally:
+            if doc is not None:
+                doc.Close(False)
+            if word is not None:
+                word.Quit()
+            if com_inicializado:
+                pythoncom.CoUninitialize()
+
+    def _on_exportado(self, destino):
+        self._set_loading(False)
+        self._status.configure(text=f"Exportado com sucesso: {os.path.basename(destino)}", text_color="#2fa843")
+
+    def _on_erro(self, msg):
+        self._set_loading(False)
+        self._status.configure(text=f"Erro: {msg}", text_color="#e74c3c")
+        messagebox.showerror("Erro ao exportar", msg)
+
+    def _set_loading(self, ativo):
+        if ativo:
+            self._progress.pack(side="left", padx=8)
+            self._progress.start()
+        else:
+            self._progress.stop()
+            self._progress.pack_forget()
 
 
 # ---------------------------------------------------------------------------
