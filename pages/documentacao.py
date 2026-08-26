@@ -36,6 +36,7 @@ _TEMPLATE_CTS                = _resource_path("arquivos", "Relatorio ctc.doc")
 _HISTORICO_PATH              = _writable_path("arquivos", "sugestoes_professor.json")
 _HISTORICO_OUTRO_CARGOS_PATH = _writable_path("arquivos", "sugestoes_outro_cargos.json")
 _CARGOS_PATH                 = _resource_path("arquivos", "cargos.json")
+_ASSINATURAS_PATH            = _resource_path("arquivos", "assinatura.json")
 
 
 # ---------------------------------------------------------------------------
@@ -69,6 +70,17 @@ def _carregar_cargos() -> dict:
         except Exception:
             pass
     return {}
+
+
+def _carregar_assinaturas() -> list[dict]:
+    if os.path.exists(_ASSINATURAS_PATH):
+        try:
+            with open(_ASSINATURAS_PATH, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+            return [item for item in dados if item.get("nome") and item.get("portaria")]
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    return []
 
 
 def _bind_scroll_dropdown(widget: ctk.CTkOptionMenu, valores: list):
@@ -374,26 +386,54 @@ class DocumentacaoPage(ctk.CTkFrame):
         self._build_ui()
 
     def _build_ui(self):
-        header = ctk.CTkFrame(self, height=60, corner_radius=0, fg_color=("gray88", "gray15"))
+        header = ctk.CTkFrame(self, height=118, corner_radius=0, fg_color=("gray88", "gray15"))
         header.grid(row=0, column=0, sticky="ew")
-        header.grid_propagate(False)
-        header.grid_columnconfigure(1, weight=1)
+        header.grid_columnconfigure(0, weight=1)
+        header.grid_rowconfigure(1, weight=1)
+        self._header = header
 
         ctk.CTkLabel(
             header, text="Documentação", font=("Arial", 20, "bold")
-        ).grid(row=0, column=0, padx=25, pady=15, sticky="w")
+        ).grid(row=0, column=0, padx=25, pady=(10, 4), sticky="w")
 
-        ctk.CTkLabel(
-            header, text="Tipo de documento:", font=("Arial", 12), text_color="gray55"
-        ).grid(row=0, column=2, padx=(0, 8), pady=15, sticky="e")
+        controles = ctk.CTkFrame(header, fg_color="transparent")
+        controles.grid(row=1, column=0, padx=25, pady=(0, 8), sticky="ew")
+        self._controles_header = controles
+
+        assinaturas = _carregar_assinaturas()
+        self._assinaturas_por_nome = {item["nome"]: item for item in assinaturas}
+        nomes_assinaturas = list(self._assinaturas_por_nome) or ["— Nenhuma assinatura cadastrada —"]
+        self._assinatura_nome = ctk.CTkOptionMenu(controles, values=nomes_assinaturas, width=190)
+        self._assinatura_cargo = ctk.CTkOptionMenu(
+            controles,
+            values=[
+                "Diretor de Recursos Humanos",
+                "Oficial Administrativo",
+                "Chefe de Divisão",
+                "Assessor de Recursos Humanos",
+                "Auxiliar Administrativo"
+            ],
+            width=190,
+        )
+
+        self._tipo_label = ctk.CTkLabel(
+            controles, text="Tipo de documento:", font=("Arial", 12), text_color="gray55"
+        )
 
         self._dropdown = ctk.CTkOptionMenu(
-            header,
+            controles,
             values=self._TIPOS,
             width=180,
             command=self._on_tipo_alterado,
         )
-        self._dropdown.grid(row=0, column=3, padx=(0, 20), pady=15, sticky="e")
+        self._header_widgets = [
+            self._assinatura_nome,
+            self._assinatura_cargo,
+            self._tipo_label,
+            self._dropdown,
+        ]
+        self._reorganizar_cabecalho()
+        header.bind("<Configure>", lambda _event: self._reorganizar_cabecalho(), add="+")
 
         self._content_area = ctk.CTkFrame(self, fg_color="transparent")
         self._content_area.grid(row=1, column=0, sticky="nsew")
@@ -406,12 +446,47 @@ class DocumentacaoPage(ctk.CTkFrame):
             "Certidões (CTS)": _SubPaginaCTS(self._content_area),
         }
         for sub in self._sub_paginas.values():
+            sub._obter_assinatura = self._obter_assinatura
             sub.grid(row=0, column=0, sticky="nsew")
 
         self._mostrar("Professor")
 
+    def _reorganizar_cabecalho(self):
+        largura = self._header.winfo_width()
+        if largura <= 1:
+            return
+        for widget in self._header_widgets:
+            widget.grid_forget()
+        for coluna in range(4):
+            self._controles_header.grid_columnconfigure(coluna, weight=1)
+
+        if largura < 620:
+            for row, widget in enumerate(self._header_widgets):
+                widget.grid(row=row, column=0, padx=4, pady=2, sticky="ew")
+            altura = 230
+        elif largura < 980:
+            for coluna, widget in enumerate(self._header_widgets[:2]):
+                widget.grid(row=0, column=coluna, padx=4, pady=2, sticky="ew")
+            self._tipo_label.grid(row=1, column=0, padx=4, pady=2, sticky="e")
+            self._dropdown.grid(row=1, column=1, padx=4, pady=2, sticky="ew")
+            altura = 118
+        else:
+            for coluna, widget in enumerate(self._header_widgets):
+                widget.grid(row=0, column=coluna, padx=4, pady=2, sticky="ew")
+            altura = 78
+        self._header.configure(height=altura)
+
     def _on_tipo_alterado(self, valor):
         self._mostrar(valor)
+
+    def _obter_assinatura(self):
+        nome = self._assinatura_nome.get()
+        dados = self._assinaturas_por_nome.get(nome, {})
+        return {
+            "{{NOME_ASSINATURA}}": dados.get("nome", ""),
+            "{{PORTARIA ASSINATURA}}": dados.get("portaria", ""),
+            "{{CARGO ASSINATURA}}": self._assinatura_cargo.get(),
+        }
 
     def _mostrar(self, tipo):
         for sub in self._sub_paginas.values():
@@ -568,6 +643,7 @@ class _SubPaginaProfessor(ctk.CTkFrame):
             return
 
         substituicoes = {ph: getter() for ph, getter in self._getters.items()}
+        substituicoes.update(getattr(self, "_obter_assinatura", lambda: {})())
 
         vazios = [ph for ph in _ENTRY_PLACEHOLDERS if not substituicoes.get(ph, "").strip()]
         datas_invalidas = [ph for ph, w in self._date_widgets.items() if not w.is_valid()]
@@ -886,6 +962,7 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
             return
 
         substituicoes = {ph: getter() for ph, getter in self._getters.items()}
+        substituicoes.update(getattr(self, "_obter_assinatura", lambda: {})())
 
         vazios         = [ph for ph in self._ENTRY_PLACEHOLDERS if not substituicoes.get(ph, "").strip()]
         datas_invalidas = [ph for ph, w in self._date_widgets.items() if not w.is_valid()]
@@ -1100,8 +1177,11 @@ class _SubPaginaCTS(ctk.CTkFrame):
             )
         periodo["inicio"] = self._criar_data(frame, 1, "Data Início")
         periodo["fim"] = self._criar_data(frame, 2, "Data Fim")
-        periodo["sem_fim"] = ctk.CTkCheckBox(frame, text="Sem data fim")
-        periodo["sem_fim"].grid(row=3, column=1, sticky="w", padx=6, pady=4)
+        periodo["sem_fim"] = ctk.CTkCheckBox(
+            frame,
+            text="Sem data fim",
+            command=lambda p=periodo: self._alternar_data_fim(p),
+        )
         ctk.CTkButton(frame, text="+", width=34, command=lambda p=periodo: self._adicionar_a_partir_de(p)).grid(
             row=3, column=1, sticky="e", padx=8, pady=4
         )
@@ -1124,6 +1204,7 @@ class _SubPaginaCTS(ctk.CTkFrame):
         periodo["cargo"].grid(row=6, column=1, sticky="ew", pady=4)
         _bind_scroll_dropdown(periodo["cargo"], opcoes)
         self._periodos.append(periodo)
+        self._atualizar_controles_periodos()
 
     def _adicionar_a_partir_de(self, periodo):
         if periodo["sem_fim"].get():
@@ -1138,9 +1219,22 @@ class _SubPaginaCTS(ctk.CTkFrame):
         self._periodos.remove(periodo)
         for row, item in enumerate(self._periodos):
             item["frame"].grid_configure(row=row)
+        self._atualizar_controles_periodos()
 
-    def _alternar_data_fim(self):
-        pass
+    def _alternar_data_fim(self, periodo):
+        estado = ctk.DISABLED if periodo["sem_fim"].get() else ctk.NORMAL
+        for widget in periodo["fim"]:
+            widget.configure(state=estado)
+
+    def _atualizar_controles_periodos(self):
+        ultimo = self._periodos[-1]
+        for periodo in self._periodos:
+            if periodo is ultimo:
+                periodo["sem_fim"].grid(row=3, column=1, sticky="w", padx=6, pady=4)
+            else:
+                periodo["sem_fim"].grid_forget()
+                periodo["sem_fim"].deselect()
+            self._alternar_data_fim(periodo)
 
     def _obter_data_widgets(self, widgets):
         mes = _MESES_PT.index(widgets[1].get()) + 1
@@ -1149,11 +1243,18 @@ class _SubPaginaCTS(ctk.CTkFrame):
     def _coletar_periodos(self):
         resultado = []
         for indice, periodo in enumerate(self._periodos):
-            inicio = self._obter_data_widgets(periodo["inicio"])
+            numero = indice + 1
+            try:
+                inicio = self._obter_data_widgets(periodo["inicio"])
+            except (ValueError, IndexError):
+                raise ValueError(f"Período {numero}: Data Início inválida") from None
             sem_fim = bool(periodo["sem_fim"].get())
-            fim = datetime.now() if sem_fim else self._obter_data_widgets(periodo["fim"])
+            try:
+                fim = datetime.now() if sem_fim else self._obter_data_widgets(periodo["fim"])
+            except (ValueError, IndexError):
+                raise ValueError(f"Período {numero}: Data Fim inválida") from None
             if fim < inicio:
-                raise ValueError(f"Data fim anterior à data início no período {indice + 1}")
+                raise ValueError(f"Período {numero}: Data Fim anterior à Data Início")
             if sem_fim and indice != len(self._periodos) - 1:
                 raise ValueError("Somente o último período pode estar sem data fim")
             cargo = periodo["cargo"].get()
@@ -1171,21 +1272,54 @@ class _SubPaginaCTS(ctk.CTkFrame):
 
     def _exportar(self):
         subs = {ph: getter() for ph, getter in self._getters.items()}
-        faltando = [ph for ph in ("{{NUMERO}}", "{{NOME}}", "{{RG}}") if not subs.get(ph, "").strip()]
-        if not self._getters["{{CPF}}"]() or not self._getters["{{CPF}}"]().replace(".", "").replace("-", "").isdigit() or len(self._getters["{{CPF}}"]().replace(".", "").replace("-", "")) != 11:
-            faltando.append("{{CPF}}")
+        subs.update(getattr(self, "_obter_assinatura", lambda: {})())
+        problemas = []
+        labels = {
+            "{{NUMERO}}": "Número",
+            "{{NOME}}": "Nome",
+            "{{RG}}": "RG",
+        }
+        problemas.extend(
+            label for placeholder, label in labels.items()
+            if not subs.get(placeholder, "").strip()
+        )
+        cpf = self._getters["{{CPF}}"]()
+        cpf_digitos = cpf.replace(".", "").replace("-", "")
+        if not cpf_digitos or not cpf_digitos.isdigit() or len(cpf_digitos) != 11:
+            problemas.append("CPF (deve conter 11 dígitos)")
+        for indice, periodo in enumerate(self._periodos):
+            numero = indice + 1
+            if not periodo["matricula"].get().strip():
+                problemas.append(f"Período {numero}: Matrícula")
+            if not periodo["portaria"].get().strip():
+                problemas.append(f"Período {numero}: Portaria")
+            cargo = periodo["cargo"].get()
+            if cargo.startswith("—"):
+                problemas.append(f"Período {numero}: Cargo")
         try:
             periodos = self._coletar_periodos()
+        except ValueError as erro:
+            problemas.append(str(erro))
+            periodos = []
+        try:
             data_doc = self._obter_data("DATA_DOC")
         except (ValueError, IndexError):
-            messagebox.showwarning("Campos inválidos", "Confira as datas informadas e os campos obrigatórios.")
+            problemas.append("Data do Documento inválida")
+            data_doc = None
+        if problemas:
+            messagebox.showwarning(
+                "Campos inválidos",
+                "Corrija os campos antes de exportar:\n• " + "\n• ".join(problemas),
+            )
             return
         for indice, periodo in enumerate(periodos):
-            for campo in ("matricula", "portaria", "cargo", "sintese"):
-                if not periodo[campo].strip():
-                    faltando.append(f"Período {indice + 1}: {campo}")
-        if faltando:
-            messagebox.showwarning("Campos inválidos", "Preencha todos os campos obrigatórios antes de exportar.")
+            if not periodo["sintese"].strip():
+                problemas.append(f"Período {indice + 1}: Síntese do cargo")
+        if problemas:
+            messagebox.showwarning(
+                "Campos inválidos",
+                "Corrija os campos antes de exportar:\n• " + "\n• ".join(problemas),
+            )
             return
         total_dias = sum(periodo["dias"] for periodo in periodos)
         detalhes_periodos = "\r".join(
@@ -1205,6 +1339,12 @@ class _SubPaginaCTS(ctk.CTkFrame):
         subs.update({
             "{{BLOCO_PERIODOS}}": texto_periodos,
             "{{DATA}}": _data_por_extenso(data_doc),
+            "{{NEGRITO_CTS}}": [
+                *(periodo["periodo"] for periodo in periodos),
+                *(periodo["cargo"] for periodo in periodos),
+                *([f"{total_dias} ({_numero_por_extenso(total_dias)}) dias de serviços prestados"]
+                  if len(periodos) > 1 else []),
+            ],
         })
         destino = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Documento Word", "*.docx")], initialfile="Relatorio cts_editado.docx")
         if not destino:
@@ -1247,6 +1387,7 @@ class _SubPaginaCTS(ctk.CTkFrame):
                     intervalo.Collapse(0)
 
             texto_periodos = subs.pop("{{BLOCO_PERIODOS}}", None)
+            textos_negrito = subs.pop("{{NEGRITO_CTS}}", [])
             if texto_periodos is not None:
                 marcador_inicio = doc.Content.Duplicate
                 marcador_inicio.Find.ClearFormatting()
@@ -1273,6 +1414,16 @@ class _SubPaginaCTS(ctk.CTkFrame):
 
             for chave, valor in subs.items():
                 substituir(chave, valor)
+            for texto in textos_negrito:
+                intervalo = doc.Content.Duplicate
+                localizar = intervalo.Find
+                localizar.ClearFormatting()
+                localizar.Text = texto
+                localizar.Forward = True
+                localizar.Wrap = 0
+                while localizar.Execute():
+                    intervalo.Font.Bold = True
+                    intervalo.Collapse(0)
             nome = subs["{{NOME}}"]
             if nome:
                 busca = doc.Content.Find
