@@ -3,8 +3,9 @@ import sys
 import re
 import json
 import copy
+import random
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 from docx import Document
@@ -33,10 +34,12 @@ def _writable_path(*parts):
 _TEMPLATE_PROFESSOR          = _resource_path("arquivos", "Relatorio Professor.docx")
 _TEMPLATE_OUTRO_CARGOS       = _resource_path("arquivos", "Relatorio Outro Cargos.docx")
 _TEMPLATE_CTS                = _resource_path("arquivos", "Relatorio ctc.doc")
+_TEMPLATE_ESTAGIO            = _resource_path("arquivos", "Relatorio estagio.doc")
 _HISTORICO_PATH              = _writable_path("arquivos", "sugestoes_professor.json")
 _HISTORICO_OUTRO_CARGOS_PATH = _writable_path("arquivos", "sugestoes_outro_cargos.json")
 _CARGOS_PATH                 = _resource_path("arquivos", "cargos.json")
 _ASSINATURAS_PATH            = _resource_path("arquivos", "assinatura.json")
+_ATRIBUICOES_PATH             = _resource_path("arquivos", "atribuicoes.json")
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +81,20 @@ def _carregar_assinaturas() -> list[dict]:
             with open(_ASSINATURAS_PATH, "r", encoding="utf-8") as f:
                 dados = json.load(f)
             return [item for item in dados if item.get("nome") and item.get("portaria")]
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+    return []
+
+
+def _carregar_atribuicoes() -> list[dict]:
+    if os.path.exists(_ATRIBUICOES_PATH):
+        try:
+            with open(_ATRIBUICOES_PATH, "r", encoding="utf-8") as f:
+                dados = json.load(f)
+            return sorted(
+                [item for item in dados if item.get("nome") and item.get("descricao")],
+                key=lambda item: item["nome"].casefold(),
+            )
         except (OSError, json.JSONDecodeError, AttributeError):
             pass
     return []
@@ -371,13 +388,58 @@ class _CpfEntry(_DigitsEntry):
         return len(re.sub(r"\D", "", self._var.get())) == 11
 
 
+def _preencher_entry(widget, valor):
+    if isinstance(widget, ctk.CTkComboBox):
+        widget.set(valor)
+    else:
+        widget.delete(0, "end")
+        widget.insert(0, valor)
+
+
+def _preencher_widgets_teste(widget, indice=0):
+    for filho in widget.winfo_children():
+        if isinstance(filho, (ctk.CTkEntry, ctk.CTkComboBox)):
+            _preencher_entry(filho, f"Teste {indice + 1}")
+            indice += 1
+        elif isinstance(filho, ctk.CTkOptionMenu):
+            valores = filho.cget("values")
+            if valores:
+                filho.set(random.choice(valores))
+        indice = _preencher_widgets_teste(filho, indice)
+    return indice
+
+
+def _listar_entries(widget):
+    encontrados = []
+    for filho in widget.winfo_children():
+        if isinstance(filho, (ctk.CTkEntry, ctk.CTkComboBox)):
+            encontrados.append(filho)
+        encontrados.extend(_listar_entries(filho))
+    return encontrados
+
+
+def _definir_data_teste(widgets, data):
+    widgets[0].set(str(data.day))
+    widgets[1].set(_MESES_PT[data.month - 1])
+    widgets[2].set(str(data.year))
+
+
+def _dados_pessoais_teste():
+    nomes = ("Rodrigo Santos", "Mariana Oliveira", "Carlos Pereira", "Ana Martins")
+    return random.choice(nomes), str(random.randint(10000000, 99999999)), str(random.randint(10000000000, 99999999999))
+
+
+def _local_teste(indice):
+    return f"Escola {random.choice(('Modelo', 'Municipal', 'Central', 'Horizonte'))} {indice + 1}"
+
+
 # ---------------------------------------------------------------------------
 # Página principal de Documentação
 # ---------------------------------------------------------------------------
 class DocumentacaoPage(ctk.CTkFrame):
     page_key = "documentacao"
 
-    _TIPOS = ["Professor", "Outros Cargos", "Certidões (CTS)"]
+    _TIPOS = ["Professor", "Outros Cargos", "Certidões (CTS)", "Estagiário (CTS)"]
 
     def __init__(self, parent):
         super().__init__(parent, corner_radius=0)
@@ -426,11 +488,16 @@ class DocumentacaoPage(ctk.CTkFrame):
             width=180,
             command=self._on_tipo_alterado,
         )
+        self._tipo_atual = self._TIPOS[0]
+        self._teste_button = ctk.CTkButton(
+            controles, text="Teste", width=90, command=self._preencher_teste
+        )
         self._header_widgets = [
             self._assinatura_nome,
             self._assinatura_cargo,
             self._tipo_label,
             self._dropdown,
+            self._teste_button,
         ]
         self._reorganizar_cabecalho()
         header.bind("<Configure>", lambda _event: self._reorganizar_cabecalho(), add="+")
@@ -444,6 +511,7 @@ class DocumentacaoPage(ctk.CTkFrame):
             "Professor":     _SubPaginaProfessor(self._content_area),
             "Outros Cargos": _SubPaginaOutrosCargos(self._content_area),
             "Certidões (CTS)": _SubPaginaCTS(self._content_area),
+            "Estagiário (CTS)": _SubPaginaEstagiario(self._content_area),
         }
         for sub in self._sub_paginas.values():
             sub._obter_assinatura = self._obter_assinatura
@@ -457,19 +525,20 @@ class DocumentacaoPage(ctk.CTkFrame):
             return
         for widget in self._header_widgets:
             widget.grid_forget()
-        for coluna in range(4):
+        for coluna in range(5):
             self._controles_header.grid_columnconfigure(coluna, weight=1)
 
         if largura < 620:
             for row, widget in enumerate(self._header_widgets):
                 widget.grid(row=row, column=0, padx=4, pady=2, sticky="ew")
-            altura = 230
+            altura = 260
         elif largura < 980:
             for coluna, widget in enumerate(self._header_widgets[:2]):
                 widget.grid(row=0, column=coluna, padx=4, pady=2, sticky="ew")
             self._tipo_label.grid(row=1, column=0, padx=4, pady=2, sticky="e")
             self._dropdown.grid(row=1, column=1, padx=4, pady=2, sticky="ew")
-            altura = 118
+            self._teste_button.grid(row=2, column=0, columnspan=2, padx=4, pady=2, sticky="ew")
+            altura = 150
         else:
             for coluna, widget in enumerate(self._header_widgets):
                 widget.grid(row=0, column=coluna, padx=4, pady=2, sticky="ew")
@@ -477,7 +546,14 @@ class DocumentacaoPage(ctk.CTkFrame):
         self._header.configure(height=altura)
 
     def _on_tipo_alterado(self, valor):
+        self._tipo_atual = valor
         self._mostrar(valor)
+
+    def _preencher_teste(self):
+        subpagina = self._sub_paginas[self._tipo_atual]
+        preencher = getattr(subpagina, "preencher_teste", None)
+        if preencher:
+            preencher()
 
     def _obter_assinatura(self):
         nome = self._assinatura_nome.get()
@@ -634,6 +710,15 @@ class _SubPaginaProfessor(ctk.CTkFrame):
             self._porcentagem_auto_label.configure(text=_PORCENTAGEM_MAP[valor])
         if self._nivel_curso_auto_label:
             self._nivel_curso_auto_label.configure(text=_NIVEL_CURSO_MAP[valor])
+
+    def preencher_teste(self):
+        _preencher_widgets_teste(self)
+        entries = _listar_entries(self)
+        nome, _, _ = _dados_pessoais_teste()
+        valores = (str(random.randint(1000, 9999)), nome, "Administração", _local_teste(0))
+        for indice, valor in enumerate(valores):
+            if indice < len(entries):
+                _preencher_entry(entries[indice], valor)
 
     # ------------------------------------------------------------------ Export
 
@@ -947,6 +1032,14 @@ class _SubPaginaOutrosCargos(ctk.CTkFrame):
             if ph in self._auto_labels:
                 self._auto_labels[ph].configure(text=dados.get(chave, "—"))
 
+    def preencher_teste(self):
+        _preencher_widgets_teste(self)
+        entries = _listar_entries(self)
+        if len(entries) > 1:
+            nome, _, _ = _dados_pessoais_teste()
+            _preencher_entry(entries[0], str(random.randint(1000, 9999)))
+            _preencher_entry(entries[1], nome)
+
     def _on_nivel_curso_alterado(self, nivel: str):
         pct, pct_ext = self._NIVEL_PORCENTAGEM.get(nivel, ("", ""))
         if "{{PORCENTAGEM}}" in self._auto_labels:
@@ -1240,6 +1333,24 @@ class _SubPaginaCTS(ctk.CTkFrame):
         mes = _MESES_PT.index(widgets[1].get()) + 1
         return datetime(int(widgets[2].get()), mes, int(widgets[0].get()))
 
+    def preencher_teste(self):
+        _preencher_widgets_teste(self)
+        entries = _listar_entries(self)
+        nome, rg, cpf = _dados_pessoais_teste()
+        for indice, valor in enumerate((str(random.randint(100000000, 999999999)), nome, rg, cpf)):
+            if indice < len(entries):
+                _preencher_entry(entries[indice], valor)
+        while len(self._periodos) < 2:
+            self._adicionar_periodo()
+        inicio = datetime(random.randint(2022, 2025), random.randint(1, 12), random.randint(1, 28))
+        for indice, periodo in enumerate(self._periodos):
+            data_inicio = inicio + timedelta(days=indice * 100)
+            data_fim = data_inicio + timedelta(days=60)
+            _definir_data_teste(periodo["inicio"], data_inicio)
+            _definir_data_teste(periodo["fim"], data_fim)
+            periodo["sem_fim"].deselect()
+            _preencher_entry(periodo["matricula"], str(1000 + indice))
+
     def _coletar_periodos(self):
         resultado = []
         for indice, periodo in enumerate(self._periodos):
@@ -1463,7 +1574,268 @@ class _SubPaginaCTS(ctk.CTkFrame):
     def _on_erro(self, msg):
         self._set_loading(False)
         self._status.configure(text=f"Erro: {msg}", text_color="#e74c3c")
-        messagebox.showerror("Erro ao exportar", msg)
+
+
+class _SubPaginaEstagiario(_SubPaginaCTS):
+
+    def __init__(self, parent):
+        self._atribuicoes = _carregar_atribuicoes()
+        super().__init__(parent)
+
+    def preencher_teste(self):
+        _preencher_widgets_teste(self)
+        entries = _listar_entries(self)
+        nome, rg, cpf = _dados_pessoais_teste()
+        for indice, valor in enumerate((nome, cpf, rg)):
+            if indice < len(entries):
+                _preencher_entry(entries[indice], valor)
+        while len(self._periodos) < 2:
+            self._adicionar_periodo()
+        inicio = datetime(random.randint(2022, 2025), random.randint(1, 12), random.randint(1, 28))
+        for indice, periodo in enumerate(self._periodos):
+            data_inicio = inicio + timedelta(days=indice * 100)
+            data_fim = data_inicio + timedelta(days=60)
+            _definir_data_teste(periodo["inicio"], data_inicio)
+            _definir_data_teste(periodo["fim"], data_fim)
+            periodo["sem_fim"].deselect()
+            _preencher_entry(periodo["local"], _local_teste(indice))
+            _preencher_entry(periodo["matricula"], str(random.randint(1000, 9999)))
+
+    def _build_form(self):
+        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        scroll.grid(row=1, column=0, sticky="nsew", padx=24, pady=(16, 0))
+        scroll.grid_columnconfigure(1, weight=1)
+        row = 0
+
+        ctk.CTkLabel(scroll, text="DADOS DO ESTAGIÁRIO", font=("Arial", 10, "bold"), text_color="gray50").grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
+        )
+        row += 1
+        campos = (
+            ("{{NOME}}", "Nome", "letters"),
+            ("{{CPF}}", "CPF", "cpf"),
+            ("{{RG}}", "RG", "digits"),
+        )
+        for placeholder, label, tipo in campos:
+            ctk.CTkLabel(scroll, text=label, font=("Arial", 12), anchor="w").grid(
+                row=row, column=0, sticky="w", padx=(8, 16), pady=4
+            )
+            if tipo == "letters":
+                widget = _LettersEntry(scroll, height=32, font=("Arial", 12))
+            elif tipo == "cpf":
+                widget = _CpfEntry(scroll, height=32, font=("Arial", 12))
+            elif tipo == "digits":
+                widget = _DigitsEntry(scroll, height=32, font=("Arial", 12))
+            else:
+                widget = ctk.CTkEntry(scroll, height=32, font=("Arial", 12))
+            widget.grid(row=row, column=1, sticky="ew", pady=4)
+            self._getters[placeholder] = lambda _w=widget: _w.get().strip()
+            row += 1
+
+        ctk.CTkLabel(scroll, text="PERÍODOS", font=("Arial", 10, "bold"), text_color="gray50").grid(
+            row=row, column=0, columnspan=2, sticky="w", pady=(16, 4)
+        )
+        row += 1
+        self._periodos_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        self._periodos_frame.grid(row=row, column=0, columnspan=2, sticky="ew")
+        self._periodos_frame.grid_columnconfigure(1, weight=1)
+        self._adicionar_periodo()
+        row += 1
+        ctk.CTkLabel(scroll, text="Data do Documento", font=("Arial", 12), anchor="w").grid(
+            row=row, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        data_frame = ctk.CTkFrame(scroll, fg_color="transparent")
+        data_frame.grid(row=row, column=1, sticky="ew", pady=4)
+        for coluna, (opcoes, padrao) in enumerate(((_DIAS, _DIA_ATUAL), (_MESES_PT, _MES_ATUAL), (_ANOS, _ANO_ATUAL))):
+            widget = ctk.CTkOptionMenu(data_frame, values=opcoes, width=[58, 118, 72][coluna], height=32)
+            widget.set(padrao)
+            widget.grid(row=0, column=coluna, padx=(0 if coluna == 0 else 4, 0))
+            self._getters[f"{{{{DATA_DOC_{coluna}}}}}"] = widget.get
+            _bind_scroll_dropdown(widget, opcoes)
+
+    def _adicionar_periodo(self):
+        periodo = {"frame": None, "inicio": [], "fim": [], "sem_fim": None,
+               "local": None, "matricula": None, "atividades": None}
+        frame = ctk.CTkFrame(self._periodos_frame, border_width=1, border_color=("gray70", "gray35"))
+        frame.grid(row=len(self._periodos), column=0, columnspan=2, sticky="ew", pady=(0, 10))
+        frame.grid_columnconfigure(1, weight=1)
+        periodo["frame"] = frame
+        numero = len(self._periodos) + 1
+        ctk.CTkLabel(frame, text=f"Período {numero}", font=("Arial", 12, "bold")).grid(
+            row=0, column=0, sticky="w", padx=8, pady=(8, 4)
+        )
+        if numero > 1:
+            ctk.CTkButton(frame, text="-", width=34, command=lambda p=periodo: self._remover_periodo(p)).grid(
+                row=0, column=1, sticky="e", padx=8, pady=(6, 2)
+            )
+        periodo["inicio"] = self._criar_data(frame, 1, "Data Início")
+        periodo["fim"] = self._criar_data(frame, 2, "Data Fim")
+        periodo["sem_fim"] = ctk.CTkCheckBox(frame, text="Sem data fim", command=lambda p=periodo: self._alternar_data_fim(p))
+        ctk.CTkButton(frame, text="+", width=34, command=lambda p=periodo: self._adicionar_a_partir_de(p)).grid(
+            row=3, column=1, sticky="e", padx=8, pady=4
+        )
+        ctk.CTkLabel(frame, text="Local", font=("Arial", 12), anchor="w").grid(
+            row=4, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        periodo["local"] = ctk.CTkEntry(frame, height=32, font=("Arial", 12))
+        periodo["local"].grid(row=4, column=1, sticky="ew", pady=4)
+        ctk.CTkLabel(frame, text="Matrícula", font=("Arial", 12), anchor="w").grid(
+            row=5, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        periodo["matricula"] = _DigitsEntry(frame, height=32, font=("Arial", 12))
+        periodo["matricula"].grid(row=5, column=1, sticky="ew", pady=4)
+        ctk.CTkLabel(frame, text="Atividades", font=("Arial", 12), anchor="w").grid(
+            row=6, column=0, sticky="w", padx=(8, 16), pady=4
+        )
+        opcoes = [item["nome"] for item in self._atribuicoes] or ["— Nenhuma atribuição cadastrada —"]
+        periodo["atividades"] = ctk.CTkOptionMenu(frame, values=opcoes, height=32)
+        periodo["atividades"].set(opcoes[0])
+        periodo["atividades"].grid(row=6, column=1, sticky="ew", pady=4)
+        _bind_scroll_dropdown(periodo["atividades"], opcoes)
+        self._periodos.append(periodo)
+        self._atualizar_controles_periodos()
+
+    def _coletar_periodos(self):
+        resultado = []
+        descricoes = {item["nome"]: item["descricao"] for item in self._atribuicoes}
+        for indice, periodo in enumerate(self._periodos):
+            numero = indice + 1
+            try:
+                inicio = self._obter_data_widgets(periodo["inicio"])
+            except (ValueError, IndexError):
+                raise ValueError(f"Período {numero}: Data Início inválida") from None
+            sem_fim = bool(periodo["sem_fim"].get())
+            try:
+                fim = datetime.now() if sem_fim else self._obter_data_widgets(periodo["fim"])
+            except (ValueError, IndexError):
+                raise ValueError(f"Período {numero}: Data Fim inválida") from None
+            if fim < inicio:
+                raise ValueError(f"Período {numero}: Data Fim anterior à Data Início")
+            if sem_fim and indice != len(self._periodos) - 1:
+                raise ValueError("Somente o último período pode estar sem data fim")
+            atividade = periodo["atividades"].get()
+            if atividade.startswith("—"):
+                atividade = ""
+            resultado.append({
+                "periodo": f"{_data_por_extenso(inicio)} até {'a presente data da emissão desta declaração' if sem_fim else _data_por_extenso(fim)}",
+                "dias": (fim - inicio).days,
+                "local": periodo["local"].get().strip(),
+                "matricula": periodo["matricula"].get(),
+                "atividade": atividade,
+                "descricao": descricoes.get(atividade, ""),
+            })
+        return resultado
+
+    def _exportar(self):
+        if not os.path.exists(_TEMPLATE_ESTAGIO):
+            messagebox.showerror("Erro", f"Template não encontrado:\n{_TEMPLATE_ESTAGIO}")
+            return
+        subs = {ph: getter() for ph, getter in self._getters.items()}
+        subs.update(getattr(self, "_obter_assinatura", lambda: {})())
+        problemas = [label for ph, label in (("{{NOME}}", "Nome"),) if not subs[ph]]
+        cpf = subs["{{CPF}}"].replace(".", "").replace("-", "")
+        if len(cpf) != 11 or not cpf.isdigit():
+            problemas.append("CPF (deve conter 11 dígitos)")
+        if not subs["{{RG}}"].strip():
+            problemas.append("RG")
+        for indice, periodo in enumerate(self._periodos):
+            if not periodo["local"].get().strip():
+                problemas.append(f"Período {indice + 1}: Local")
+            if not periodo["matricula"].get().strip():
+                problemas.append(f"Período {indice + 1}: Matrícula")
+            if periodo["atividades"].get().startswith("—"):
+                problemas.append(f"Período {indice + 1}: Atividades")
+        try:
+            periodos = self._coletar_periodos()
+        except ValueError as erro:
+            problemas.append(str(erro))
+            periodos = []
+        try:
+            data_doc = self._obter_data_estagio()
+        except (ValueError, IndexError):
+            problemas.append("Data do Documento inválida")
+            data_doc = None
+        if problemas:
+            messagebox.showwarning("Campos inválidos", "Corrija os campos antes de exportar:\n• " + "\n• ".join(problemas))
+            return
+        total_dias = sum(item["dias"] for item in periodos)
+        bloco = "\r".join(
+            f"{item['local']} sob matrícula n° {item['matricula']}, desenvolvendo as atividades a seguir: {item['descricao']}, durante o período de {item['periodo']}."
+            for item in periodos
+        )
+        subs["{{TOTALIZADOR}}"] = f"{total_dias} ({_numero_por_extenso(total_dias)})"
+        subs["{{DATA}}"] = _data_por_extenso(data_doc)
+        subs["{{NEGRITO_ESTAGIO}}"] = [
+            subs["{{NOME}}"],
+            subs["{{TOTALIZADOR}}"],
+            *(item["periodo"] for item in periodos),
+        ]
+        destino = filedialog.asksaveasfilename(defaultextension=".docx", filetypes=[("Documento Word", "*.docx")], initialfile="Relatorio estagio_editado.docx")
+        if not destino:
+            return
+        self._set_loading(True)
+        threading.Thread(target=self._thread_exportar_estagio, args=(subs, bloco, destino), daemon=True).start()
+
+    def _obter_data_estagio(self):
+        valores = [self._getters[f"{{{{DATA_DOC_{coluna}}}}}"]() for coluna in range(3)]
+        return datetime(int(valores[2]), _MESES_PT.index(valores[1]) + 1, int(valores[0]))
+
+    def _thread_exportar_estagio(self, subs, bloco, destino):
+        word = doc = None
+        com_inicializado = False
+        try:
+            import pythoncom
+            import win32com.client
+            pythoncom.CoInitialize()
+            com_inicializado = True
+            word = win32com.client.DispatchEx("Word.Application")
+            word.Visible = False
+            word.DisplayAlerts = 0
+            doc = word.Documents.Open(os.path.abspath(_TEMPLATE_ESTAGIO), ConfirmConversions=False, ReadOnly=False, AddToRecentFiles=False, NoEncodingDialog=True)
+            inicio = doc.Content.Duplicate
+            inicio.Find.Text = "{{LOCAL}}"
+            if not inicio.Find.Execute():
+                raise ValueError("O marcador {{LOCAL}} não foi encontrado no template de estágio.")
+            fim = doc.Content.Duplicate
+            fim.Find.Text = "{{PERIODO}}"
+            if not fim.Find.Execute():
+                raise ValueError("O trecho dos períodos não foi encontrado no template de estágio.")
+            bloco_range = doc.Range(inicio.Start, fim.End)
+            bloco_range.Text = bloco
+            bloco_range.Font.Bold = False
+            textos_negrito = subs.pop("{{NEGRITO_ESTAGIO}}", [])
+            for chave, valor in subs.items():
+                intervalo = doc.Content.Duplicate
+                localizar = intervalo.Find
+                localizar.Text = chave
+                localizar.Forward = True
+                localizar.Wrap = 0
+                while localizar.Execute():
+                    intervalo.Text = str(valor)
+                    intervalo.Collapse(0)
+            for texto in textos_negrito:
+                if not texto:
+                    continue
+                intervalo = doc.Content.Duplicate
+                localizar = intervalo.Find
+                localizar.Text = texto
+                localizar.Forward = True
+                localizar.Wrap = 0
+                while localizar.Execute():
+                    intervalo.Font.Bold = True
+                    intervalo.Collapse(0)
+            doc.SaveAs2(os.path.abspath(destino), FileFormat=16)
+            self.after(0, lambda: self._on_exportado(destino))
+        except Exception as erro:
+            mensagem = str(erro)
+            self.after(0, lambda: self._on_erro(mensagem))
+        finally:
+            if doc is not None:
+                doc.Close(False)
+            if word is not None:
+                word.Quit()
+            if com_inicializado:
+                pythoncom.CoUninitialize()
 
     def _set_loading(self, ativo):
         if ativo:
