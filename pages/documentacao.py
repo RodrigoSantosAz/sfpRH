@@ -1382,6 +1382,9 @@ class _SubPaginaCTS(ctk.CTkFrame):
         self._status.grid(row=2, column=0, padx=25, pady=(4, 8), sticky="w")
 
     def _exportar(self):
+        if not os.path.exists(_TEMPLATE_CTS):
+            messagebox.showerror("Erro", f"Template não encontrado:\n{_TEMPLATE_CTS}")
+            return
         subs = {ph: getter() for ph, getter in self._getters.items()}
         subs.update(getattr(self, "_obter_assinatura", lambda: {})())
         problemas = []
@@ -1484,9 +1487,36 @@ class _SubPaginaCTS(ctk.CTkFrame):
                 ConfirmConversions=False,
                 ReadOnly=False,
                 AddToRecentFiles=False,
-                NoEncodingDialog=True,
             )
+            def substituir_no_intervalo(intervalo, texto, valor):
+                inicio = intervalo.Start
+                while inicio < doc.Content.End:
+                    fim = doc.Content.End
+                    alvo = doc.Range(inicio, fim)
+                    localizar = alvo.Find
+                    localizar.ClearFormatting()
+                    localizar.Text = texto
+                    localizar.Forward = True
+                    localizar.Wrap = 0
+                    if not localizar.Execute():
+                        break
+                    alvo.Text = str(valor)
+                    novo_inicio = alvo.End
+                    if novo_inicio <= inicio:
+                        novo_inicio = inicio + 1
+                    inicio = novo_inicio
+
             def substituir(texto, valor):
+                substituir_no_intervalo(doc.Content.Duplicate, texto, valor)
+                for secao in doc.Sections:
+                    for cabecalho in secao.Headers:
+                        substituir_no_intervalo(cabecalho.Range.Duplicate, texto, valor)
+                    for rodape in secao.Footers:
+                        substituir_no_intervalo(rodape.Range.Duplicate, texto, valor)
+
+            def aplicar_negrito(texto):
+                if not texto:
+                    return
                 intervalo = doc.Content.Duplicate
                 localizar = intervalo.Find
                 localizar.ClearFormatting()
@@ -1494,8 +1524,8 @@ class _SubPaginaCTS(ctk.CTkFrame):
                 localizar.Forward = True
                 localizar.Wrap = 0
                 while localizar.Execute():
-                    intervalo.Text = str(valor)
-                    intervalo.Collapse(0)
+                    intervalo.Font.Bold = True
+                    intervalo.SetRange(intervalo.End, doc.Content.End)
 
             texto_periodos = subs.pop("{{BLOCO_PERIODOS}}", None)
             textos_negrito = subs.pop("{{NEGRITO_CTS}}", [])
@@ -1525,27 +1555,20 @@ class _SubPaginaCTS(ctk.CTkFrame):
 
             for chave, valor in subs.items():
                 substituir(chave, valor)
+            restantes = [chave for chave in (
+                "{{NUMERO}}", "{{NOME}}", "{{GENERO_1}}", "{{RG}}",
+                "{{GENERO_AO}}", "{{CPF}}", "{{MATRICULA}}", "{{CARGO}}",
+                "{{PORTARIA}}", "{{SINTESE}}", "{{PERIODO}}", "{{PERIODO_EXTENSO}}",
+                "{{DATA}}", "{{NOME_ASSINATURA}}", "{{CARGO ASSINATURA}}",
+                "{{PORTARIA ASSINATURA}}",
+            ) if chave in doc.Content.Text]
+            if restantes:
+                raise ValueError("Placeholders não substituídos no CTS: " + ", ".join(restantes))
             for texto in textos_negrito:
-                intervalo = doc.Content.Duplicate
-                localizar = intervalo.Find
-                localizar.ClearFormatting()
-                localizar.Text = texto
-                localizar.Forward = True
-                localizar.Wrap = 0
-                while localizar.Execute():
-                    intervalo.Font.Bold = True
-                    intervalo.Collapse(0)
+                aplicar_negrito(texto)
             nome = subs["{{NOME}}"]
             if nome:
-                busca = doc.Content.Find
-                busca.ClearFormatting()
-                busca.Replacement.ClearFormatting()
-                busca.Text = nome
-                busca.Forward = True
-                busca.Wrap = 0
-                while busca.Execute():
-                    busca.Parent.Font.Bold = True
-                    busca.Parent.Collapse(0)
+                aplicar_negrito(nome)
             doc.SaveAs2(os.path.abspath(destino), FileFormat=16)
             self.after(0, lambda: self._on_exportado(destino))
         except Exception as e:
@@ -1574,6 +1597,15 @@ class _SubPaginaCTS(ctk.CTkFrame):
     def _on_erro(self, msg):
         self._set_loading(False)
         self._status.configure(text=f"Erro: {msg}", text_color="#e74c3c")
+        messagebox.showerror("Erro ao exportar CTS", msg)
+
+    def _set_loading(self, ativo):
+        if ativo:
+            self._progress.pack(side="left", padx=8)
+            self._progress.start()
+        else:
+            self._progress.stop()
+            self._progress.pack_forget()
 
 
 class _SubPaginaEstagiario(_SubPaginaCTS):
